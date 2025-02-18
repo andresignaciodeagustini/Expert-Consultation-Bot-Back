@@ -1,0 +1,5 @@
+functions-framework==3.*
+google-cloud-dialogflow==2.*
+flask==2.*
+openai==1.*
+python-dotenv==1.*
