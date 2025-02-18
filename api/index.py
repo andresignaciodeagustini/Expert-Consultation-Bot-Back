@@ -13,7 +13,22 @@ from src.utils.chatgpt_helper import ChatGPTHelper
 from src.services.zoho_services import ZohoService
 
 app = Flask(__name__)
-CORS(app)
+
+# Configuración actualizada de CORS
+CORS(app, resources={
+    r"/*": {
+        "origins": [
+            "https://expert-consultation-bot-front.vercel.app",
+            "https://expert-consultation-bot-front-isej4yvne.vercel.app",
+            "http://localhost:5173",
+            "http://localhost:3000"
+        ],
+        "methods": ["GET", "POST", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization"],
+        "expose_headers": ["Content-Type", "Authorization"],
+        "supports_credentials": True
+    }
+})
 
 VALID_SECTORS = ["Technology", "Financial Services", "Manufacturing"]
 
@@ -40,8 +55,16 @@ def webhook():
             'fulfillmentText': "An error occurred while processing your request."
         })
 
-@app.route('/process-message', methods=['POST'])
+@app.route('/process-message', methods=['POST', 'OPTIONS'])
 def process_message():
+    # Logs para debugging
+    print("Request received at /process-message")
+    print("Method:", request.method)
+    print("Headers:", dict(request.headers))
+    
+    if request.method == 'OPTIONS':
+        return jsonify({"status": "ok"})
+
     try:
         data = request.json
         print("Received data:", data)  
@@ -122,7 +145,6 @@ def test():
         'status': 'OK'
     })
 
-# Añadido el bloque de inicio del servidor
 if __name__ == '__main__':
     print("Starting server on http://127.0.0.1:8080")
     serve(app, host='0.0.0.0', port=8080)
