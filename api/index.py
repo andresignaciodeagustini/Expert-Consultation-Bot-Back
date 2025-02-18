@@ -1,3 +1,8 @@
+import sys
+from pathlib import Path
+
+sys.path.append(str(Path(__file__).parent.parent))
+
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from waitress import serve
@@ -11,7 +16,6 @@ app = Flask(__name__)
 CORS(app)
 
 VALID_SECTORS = ["Technology", "Financial Services", "Manufacturing"]
-
 
 @app.route('/', methods=['POST'])
 def webhook():
@@ -50,14 +54,12 @@ def process_message():
 
         location = data.get('message')
         sector = data.get('sector')
-
         
         if not location or not sector:
             return jsonify({
                 'success': False,
                 'message': 'Location and sector cannot be empty'
             })
-
         
         if sector not in VALID_SECTORS:
             return jsonify({
@@ -67,7 +69,6 @@ def process_message():
 
         chatgpt = ChatGPTHelper()
         zoho_service = ZohoService()
-
        
         region_result = chatgpt.identify_region(location)
         print(f"Region result: {region_result}")  
@@ -79,7 +80,6 @@ def process_message():
             })
 
         region = region_result['region']
-
         
         zoho_companies = zoho_service.get_accounts_by_industry_and_region(
             industry=sector,
@@ -122,6 +122,7 @@ def test():
         'status': 'OK'
     })
 
+# Añadido el bloque de inicio del servidor
 if __name__ == '__main__':
     print("Starting server on http://127.0.0.1:8080")
     serve(app, host='0.0.0.0', port=8080)

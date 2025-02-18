@@ -1,5 +1,7 @@
-functions-framework==3.*
-google-cloud-dialogflow==2.*
-flask==2.*
-openai==1.*
-python-dotenv==1.*
+functions-framework>=3.0.0
+google-cloud-dialogflow>=2.0.0
+flask>=2.0.0
+flask-cors>=3.0.0
+openai>=1.0.0
+python-dotenv>=1.0.0
+waitress>=2.0.0
