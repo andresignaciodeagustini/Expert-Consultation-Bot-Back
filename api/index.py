@@ -74,6 +74,81 @@ CORS(app, resources={
 print("\n=== Initializing Services ===")
 zoho_service = ZohoService()
 
+@app.route('/refresh-token', methods=['POST'])
+def refresh_token():
+    try:
+        refresh_url = "https://accounts.zoho.com/oauth/v2/token"
+        params = {
+            'refresh_token': os.getenv('ZOHO_REFRESH_TOKEN'),
+            'client_id': os.getenv('ZOHO_CLIENT_ID'),
+            'client_secret': os.getenv('ZOHO_CLIENT_SECRET'),
+            'grant_type': 'refresh_token'
+        }
+        
+        print("\n=== Refreshing Token ===")
+        print(f"Using refresh token: {params['refresh_token'][:10]}...")
+        
+        response = requests.post(refresh_url, params=params)
+        print(f"Refresh response status: {response.status_code}")
+        
+        if response.status_code == 200:
+            new_token = response.json().get('access_token')
+            
+            # Actualizar token en memoria
+            global token
+            token = new_token
+            zoho_service.access_token = new_token
+            
+            # Actualizar en Vercel si estamos en producción
+            if os.getenv('ENVIRONMENT') == 'production':
+                vercel_api_url = f"https://api.vercel.com/v1/projects/{os.getenv('VERCEL_PROJECT_ID')}/env"
+                headers = {
+                    'Authorization': f'Bearer {os.getenv("VERCEL_TOKEN")}'
+                }
+                data = {
+                    'key': 'ZOHO_ACCESS_TOKEN',
+                    'value': new_token,
+                    'target': ['production']
+                }
+                
+                print("\n=== Updating Vercel Environment ===")
+                vercel_response = requests.post(vercel_api_url, headers=headers, json=data)
+                print(f"Vercel update status: {vercel_response.status_code}")
+            
+            # Actualizar archivo .env local si estamos en desarrollo
+            else:
+                try:
+                    with open(env_path, 'r') as file:
+                        lines = file.readlines()
+                    
+                    with open(env_path, 'w') as file:
+                        for line in lines:
+                            if line.startswith('ZOHO_ACCESS_TOKEN='):
+                                file.write(f'ZOHO_ACCESS_TOKEN={new_token}\n')
+                            else:
+                                file.write(line)
+                    print("\n=== Updated local .env file ===")
+                except Exception as e:
+                    print(f"Error updating .env file: {str(e)}")
+            
+            return jsonify({
+                'success': True,
+                'message': 'Token updated successfully',
+                'new_token': new_token[:10] + '...'
+            })
+            
+        return jsonify({
+            'success': False,
+            'message': f'Failed to refresh token: {response.text}'
+        })
+        
+    except Exception as e:
+        print(f"Error in refresh_token: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 @app.route('/', methods=['POST'])
 def webhook():
     try:
