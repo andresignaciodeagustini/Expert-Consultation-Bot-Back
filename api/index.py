@@ -2,7 +2,26 @@ import sys
 from pathlib import Path
 import os
 from dotenv import load_dotenv
+import sys
+from pathlib import Path
+
+# Mover esta línea al inicio
+sys.path.append(str(Path(__file__).parent.parent))
+
+import os
+from dotenv import load_dotenv
 import requests
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+from waitress import serve
+from src.handlers.email_handler import handle_email_capture
+from src.handlers.sector_handler import handle_sector_capture
+from src.handlers.geography_handler import handle_geography_capture
+from src.handlers.voice_handler import VoiceHandler
+from src.utils.chatgpt_helper import ChatGPTHelper
+from src.services.zoho_services import ZohoService
+from src.utils.config import VALID_SECTORS
+from src.routes.ai.voiceRoutes import voice_routes
 
 # Configuración inicial
 print("\n=== Environment Setup ===")
@@ -43,15 +62,8 @@ else:
 
 sys.path.append(str(Path(__file__).parent.parent))
 
-from flask import Flask, request, jsonify
-from flask_cors import CORS
-from waitress import serve
-from src.handlers.email_handler import handle_email_capture
-from src.handlers.sector_handler import handle_sector_capture
-from src.handlers.geography_handler import handle_geography_capture
-from src.utils.chatgpt_helper import ChatGPTHelper
-from src.services.zoho_services import ZohoService
-from src.utils.config import VALID_SECTORS
+
+
 
 app = Flask(__name__)
 
@@ -71,8 +83,11 @@ CORS(app, resources={
     }
 })
 
+app.register_blueprint(voice_routes, url_prefix='/api/ai/voice')
+
 print("\n=== Initializing Services ===")
 zoho_service = ZohoService()
+voice_handler = VoiceHandler()
 
 @app.route('/refresh-token', methods=['POST'])
 def refresh_token():
@@ -171,6 +186,144 @@ def webhook():
         return jsonify({
             'fulfillmentText': "An error occurred while processing your request."
         })
+    
+@app.route('/api/ai/voice/process', methods=['POST'])
+
+def process_voice():
+    print("\n=== New Voice Request ===")
+    print("Method:", request.method)
+    print("Headers:", dict(request.headers))
+
+    try:
+        voice_result = voice_handler.handle_voice_request (request)
+
+        if not voice_result.get('success'):
+            return jsonify(voice_result),400
+        
+        voice_data = {
+            'message': voice_result ['original_text'],
+            'sector':None
+        }
+
+        print("/n=== Voice Transcription===")
+        print("Text:", voice_result ['original_text'])
+        print("Language:", voice_result['detected_language'])
+
+        return process_message_with_language(voice_data, voice_result['detected_language'])
+    
+    except Exception as e:
+        print("f\n===Error in voice processing===")
+        print(f"Error type:, {type(e).__name__}")
+        print(f"Error message:{str(e)} ")
+        return jsonify ({
+                'success':False,
+                'error': str(e)
+        }),500
+    
+def process_message_with_language(data:dict, detected_language:str):
+    print("\n=== New Request with Language===")
+    print("Data:", data)
+    print("Detected Language:", detected_language)
+
+    try:
+        if 'message' not in data:
+            return jsonify ({
+                'success':False,
+                'message': 'Location (message) is requirred',
+                'language': detected_language
+            })
+        
+        location = data.get('message')
+        sector = data.get('sector')
+
+        print(f"\n===Validating Input===")
+        print(f"Location: {location}")
+        print(f"Sector: {sector}")
+
+        if not location:
+            return jsonify({
+                'success': False,
+                'message':'Location cannot be empty',
+                'language': detected_language
+
+            })
+
+        print ("\n=== Initializing ChatGPT===")
+        chatgpt = ChatGPTHelper()
+
+        print("\n=== Region Identification===")
+        region_result = chatgpt.identify_region(location)
+        print(f"Region result: {region_result}")
+
+        if not region_result ['successs']:
+            return jsonify({
+                'success': False,
+                'message': 'Location not int supported regions (North America, Europe, Asia)',
+
+                'language': detected_language
+                })
+        
+        region = region_result['region']
+
+        if not sector:
+
+            return jsonify({
+                'success': True,
+                'message':f'Region identified: {region}',
+                'region':region,
+                'language': detected_language,
+                'needsSector': True
+            })
+        if sector not in VALID_SECTORS:
+            return jsonify ({
+                'success': False,
+                'message': f'Invalid sector. Must be one of: {",".join(VALID_SECTORS)}',
+                'language': detected_language
+            })
+        
+        zoho_companies = zoho_service.get_accounts_by_industry_and_region(
+            industry= sector,
+            region=region
+        )
+
+        companies_needed = 20 - len(zoho_companies)
+        chatgpt_suggestions = []
+
+        if companies_needed >0:
+            chatgpt_result = chatgpt.get_companies_suggestions(
+                sector=sector,
+                geography=region
+            )
+
+            if chatgpt_result ['success']:
+                chatgpt_suggestions = chatgpt_result['content'] [:companies_needed]
+        
+        return jsonify ({
+            'success': True,
+            'message': f'Found {sector} companies in {region}',
+            'companies': {
+                'zoho_companies': zoho_companies,
+                'suggested_companies':  [
+                    {'name': company} for company in chatgpt_suggestions
+                ]
+            },
+            'language': detected_language
+        })
+    
+    except Exception as e:
+        print (f"\n=== Error in message processing===")
+        print (f"Error type: {type(e).__name__}")
+        print (f"Error message: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': 'Error processing your request',
+            'language': detected_language
+        }),500
+
+
+
+
+
 
 @app.route('/process-message', methods=['POST', 'OPTIONS'])
 def process_message():
@@ -279,8 +432,15 @@ def process_message():
 def test():
     return jsonify({
         'message': 'Backend is running!',
-        'status': 'OK'
-    })
+        'status': 'OK',
+        'endpoints': {
+            'webhook':'/',
+            'process-messages': '/process-messages',
+            'voice': '/api/ai/voice/process',
+            'test': '/test'
+        }
+    }),
+    
 
 if __name__ == '__main__':
     print("\n=== Starting Server ===")
