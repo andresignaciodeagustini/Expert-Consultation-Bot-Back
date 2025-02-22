@@ -220,19 +220,19 @@ def process_voice():
                 'error': str(e)
         }),500
     
-def process_message_with_language(data:dict, detected_language:str):
+def process_message_with_language(data: dict, detected_language: str):
     print("\n=== New Request with Language===")
     print("Data:", data)
     print("Detected Language:", detected_language)
 
     try:
         if 'message' not in data:
-            return jsonify ({
-                'success':False,
-                'message': 'Location (message) is requirred',
+            return jsonify({
+                'success': False,
+                'message': 'Location (message) is required',
                 'language': detected_language
             })
-        
+
         location = data.get('message')
         sector = data.get('sector')
 
@@ -243,82 +243,87 @@ def process_message_with_language(data:dict, detected_language:str):
         if not location:
             return jsonify({
                 'success': False,
-                'message':'Location cannot be empty',
+                'message': 'Location cannot be empty',
                 'language': detected_language
-
             })
 
-        print ("\n=== Initializing ChatGPT===")
+        print("\n=== Initializing ChatGPT===")
         chatgpt = ChatGPTHelper()
-
-        print("\n=== Region Identification===")
-        region_result = chatgpt.identify_region(location)
-        print(f"Region result: {region_result}")
-
-        if not region_result ['successs']:
-            return jsonify({
-                'success': False,
-                'message': 'Location not int supported regions (North America, Europe, Asia)',
-
-                'language': detected_language
-                })
         
-        region = region_result['region']
-
+        # Usar el nuevo método process_text_input
         if not sector:
-
+            text_result = chatgpt.process_text_input(location)
+            if not text_result['success']:
+                return jsonify({
+                    'success': False,
+                    'message': text_result['message'],
+                    'language': detected_language
+                })
+            
             return jsonify({
                 'success': True,
-                'message':f'Region identified: {region}',
-                'region':region,
-                'language': detected_language,
+                'message': text_result['message'],
+                'region': text_result['region'],
+                'language': text_result['detected_language'],
                 'needsSector': True
             })
+
+        # El resto del código para cuando hay sector permanece igual
+        region_result = chatgpt.identify_region(location)
+        if not region_result['success']:
+            return jsonify({
+                'success': False,
+                'message': 'Location not in supported regions (North America, Europe, Asia)',
+                'language': detected_language
+            })
+
+        region = region_result['region']
+
         if sector not in VALID_SECTORS:
-            return jsonify ({
+            return jsonify({
                 'success': False,
                 'message': f'Invalid sector. Must be one of: {",".join(VALID_SECTORS)}',
                 'language': detected_language
             })
-        
+
         zoho_companies = zoho_service.get_accounts_by_industry_and_region(
-            industry= sector,
+            industry=sector,
             region=region
         )
 
         companies_needed = 20 - len(zoho_companies)
         chatgpt_suggestions = []
 
-        if companies_needed >0:
+        if companies_needed > 0:
             chatgpt_result = chatgpt.get_companies_suggestions(
                 sector=sector,
                 geography=region
             )
 
-            if chatgpt_result ['success']:
-                chatgpt_suggestions = chatgpt_result['content'] [:companies_needed]
-        
-        return jsonify ({
+            if chatgpt_result['success']:
+                chatgpt_suggestions = chatgpt_result['content'][:companies_needed]
+
+        return jsonify({
             'success': True,
             'message': f'Found {sector} companies in {region}',
             'companies': {
                 'zoho_companies': zoho_companies,
-                'suggested_companies':  [
+                'suggested_companies': [
                     {'name': company} for company in chatgpt_suggestions
                 ]
             },
             'language': detected_language
         })
-    
+
     except Exception as e:
-        print (f"\n=== Error in message processing===")
-        print (f"Error type: {type(e).__name__}")
-        print (f"Error message: {str(e)}")
+        print(f"\n=== Error in message processing===")
+        print(f"Error type: {type(e).__name__}")
+        print(f"Error message: {str(e)}")
         return jsonify({
             'success': False,
             'message': 'Error processing your request',
             'language': detected_language
-        }),500
+        }), 500
 
 
 
@@ -428,18 +433,113 @@ def process_message():
             'message': 'Error processing your request'
         }), 500
 
+
+# Crear una instancia de ChatGPTHelper al inicio junto con tus otros servicios
+print("\n=== Initializing Services ===")
+zoho_service = ZohoService()
+voice_handler = VoiceHandler()
+chatgpt_helper = ChatGPTHelper()  # Añade esta línea
+
+# Añade los nuevos endpoints antes del if __name__ == '__main__':
+
+@app.route('/api/ai/detect-language', methods=['POST', 'OPTIONS'])
+def detect_language():
+    print("\n=== New Request to /api/detect-language ===")
+    print("Method:", request.method)
+    print("Headers:", dict(request.headers))
+    
+    if request.method == 'OPTIONS':
+        return jsonify({"status": "ok"})
+
+    try:
+        data = request.json
+        print("\n=== Request Data ===")
+        print("Received data:", data)
+
+        if 'text' not in data:
+            return jsonify({
+                'success': False,
+                'message': 'Text is required'
+            }), 400
+
+        detected_language = chatgpt_helper.detected_language_from_content(data['text'])
+        
+        print(f"\n=== Language Detection Result ===")
+        print(f"Detected language: {detected_language}")
+
+        return jsonify({
+            'success': True,
+            'detected_language': detected_language
+        })
+
+    except Exception as e:
+        print(f"\n=== Error in detect_language ===")
+        print(f"Error type: {type(e).__name__}")
+        print(f"Error message: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': 'Error detecting language'
+        }), 500
+
+@app.route('/api/ai/translate', methods=['POST', 'OPTIONS'])
+def translate():
+    print("\n=== New Request to /api/translate ===")
+    print("Method:", request.method)
+    print("Headers:", dict(request.headers))
+    
+    if request.method == 'OPTIONS':
+        return jsonify({"status": "ok"})
+
+    try:
+        data = request.json
+        print("\n=== Request Data ===")
+        print("Received data:", data)
+
+        if 'text' not in data or 'target_language' not in data:
+            return jsonify({
+                'success': False,
+                'message': 'Both text and target_language are required'
+            }), 400
+
+        translated_text = chatgpt_helper.translate_message(
+            data['text'], 
+            data['target_language']
+        )
+        
+        print(f"\n=== Translation Result ===")
+        print(f"Original text: {data['text']}")
+        print(f"Target language: {data['target_language']}")
+        print(f"Translated text: {translated_text}")
+
+        return jsonify({
+            'success': True,
+            'translated_text': translated_text
+        })
+
+    except Exception as e:
+        print(f"\n=== Error in translate ===")
+        print(f"Error type: {type(e).__name__}")
+        print(f"Error message: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': 'Error translating text'
+        }), 500
+
+# Actualiza la función test para incluir los nuevos endpoints
 @app.route('/test', methods=['GET'])
 def test():
     return jsonify({
         'message': 'Backend is running!',
         'status': 'OK',
         'endpoints': {
-            'webhook':'/',
+            'webhook': '/',
             'process-messages': '/process-messages',
             'voice': '/api/ai/voice/process',
+            'detect-language': '/api/detect-language',
+            'translate': '/api/translate',
             'test': '/test'
         }
-    }),
+    })
     
 
 if __name__ == '__main__':
