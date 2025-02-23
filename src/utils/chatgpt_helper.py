@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from typing import BinaryIO
 import tempfile
 from pathlib import Path
+import requests  
 from ..utils.config import VALID_SECTORS
 
 BOT_MESSAGES = {
@@ -21,6 +22,12 @@ BOT_MESSAGES = {
     "additional_suggestions": "Additional Suggestions:",
     "search_more": "Would you like to search for more companies? Please enter a new location:"
 }
+
+API_ENDPOINTS = {
+    "detect_language": "http://localhost:8080/api/ai/detect-language",
+    "translate": "http://localhost:8080/api/ai/translate"
+}
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -114,24 +121,22 @@ class ChatGPTHelper:
     def translate_sector(self, sector_input:str) -> Dict:
         try:
             messages = [
-                 {
-                     "role":"system",
-                     "content": """ You are a multilingual translator spececialized in business sector.
-                     Your task is to identify if the input refers to any of these sectors:
-                     -Technology(including tech, te, tecnologia, technologie,etc.)
-                     -Financial Services (including finance, servicion financierons, servizi fiannziari, etc.)
-                     -Manufacturing (including finance, servicios financieros, servici finanziari, etc.)
+                {
+                    "role":"system",
+                    "content": """ You are a multilingual translator spececialized in business sector.
+                    Your task is to identify if the input refers to any of these sectors:
+                    -Technology(including tech, te, tecnologia, technologie,etc.)
+                    -Financial Services (including finance, servicion financierons, servizi fiannziari, etc.)
+                    -Manufacturing (including finance, servicios financieros, servici finanziari, etc.)
 
-                     If the input matches any sector in ANY language, returnt the English version.
-                     If it doesn't match, return 'invalid'.
-                     Only return the exact English version or 'invalid', nothing else."""
-                 },
-                  {
-                      
-                      "role":"user",
-                      "content":f"Transalate this sector:  {sector_input}"
-                  }
-
+                    If the input matches any sector in ANY language, returnt the English version.
+                    If it doesn't match, return 'invalid'.
+                    Only return the exact English version or 'invalid', nothing else."""
+                },
+                {
+                    "role":"user",
+                    "content":f"Transalate this sector:  {sector_input}"
+                }
             ]
 
             response = self.client.chat.completions.create(
@@ -140,7 +145,7 @@ class ChatGPTHelper:
                 temperature=0.3
             )
 
-            english_sector = response.choices [0].message.content.strip()
+            english_sector = response.choices[0].message.content.strip()
 
             if english_sector == 'invalid':
                 error_sectors = "Technology, Financial Services, Manufacturing"
@@ -155,7 +160,7 @@ class ChatGPTHelper:
             
             displayed_sector = self.translate_message(english_sector, self.current_language)
 
-            return  {
+            return {
                 "success": True,
                 "translated_sector":english_sector,
                 "displayed_sector": displayed_sector,
@@ -164,20 +169,10 @@ class ChatGPTHelper:
         
         except Exception as e:
             logger.error(f"Error translating sector: {str(e)}")
-            return  {
+            return {
                 "success":False,
                 "error": str(e)
             }
-
-
-
-
-
-
-
-
-
-
 
     def get_bot_response(self, response_key: str, *args) -> str:
         english_message = BOT_MESSAGES[response_key].format(*args) if args else BOT_MESSAGES[response_key]
@@ -230,7 +225,6 @@ class ChatGPTHelper:
                 "success": False,
                 "error": str(e)
             }
-
     def get_companies_suggestions(
         self,
         sector: str,
@@ -296,7 +290,6 @@ class ChatGPTHelper:
 
             logger.info(f"Successfully generated {len(companies)} companies")
 
-            # Traducir todos los mensajes de la respuesta
             translated_messages = {
                 "title": self.translate_message(
                     f"Found {sector} companies in {geography}",
@@ -325,134 +318,71 @@ class ChatGPTHelper:
                 "contentId": None,
                 "detected_language": self.current_language
             }
+        
 
-    
-
-    def process_voice_input(self, audio_file: BinaryIO) -> Dict:
+        
+    def process_voice_input(self, audio_file: BinaryIO, step: str = 'transcribe') -> Dict:
+        temp_path = None
         try:
-            logger.info("Processing voice input")
+            logger.info(f"Processing voice input for transcription")
 
+            # Validaciones básicas del archivo
             if not audio_file or not hasattr(audio_file, 'filename'):
-                logger.error("No valid audio file provided")
-                error_message = self.get_bot_response('error_no_audio')
                 return {
                     "success": False,
-                    "error": error_message,
-                    "detected_language": self.current_language
+                    "error": "No valid audio file provided"
                 }
 
-            logger.info(f"File info:")
-            logger.info(f"- Filename: {audio_file.filename}")
-            logger.info(f"- Content Type: {getattr(audio_file, 'content_type', 'unknown')}")
-            logger.info(f"- Size: {getattr(audio_file, 'content_length', 'unknown')}")
+            # Crear y procesar archivo temporal
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.mp3') as temp_audio:
+                audio_file.seek(0)
+                temp_audio.write(audio_file.read())
+                temp_path = Path(temp_audio.name)
 
-            filename = audio_file.filename.lower()
-            valid_formats = ['flac', 'm4a', 'mp3', 'mp4', 'mpeg', 'mpga', 'oga', 'ogg', 'wav', 'webm']
-            file_extension = filename.split('.')[-1] if '.' in filename else ''
+            # Transcripción del audio
+            with open(temp_path, 'rb') as audio:
+                transcript = self.client.audio.transcriptions.create(
+                    model="whisper-1",
+                    file=audio,
+                    response_format="text"  # Cambiado a "text" para simplificar
+                )
 
-            logger.info(f"- File Extension: {file_extension}")
+            # Obtener el texto transcrito
+            transcribed_text = transcript.strip()
+            print(f"Transcribed text: {transcribed_text}")  # Para debug
 
-            if file_extension not in valid_formats:
-                logger.error(f"Invalid file format: {file_extension}")
-                error_message = self.get_bot_response('error_invalid_format')
-                return {
-                    "success": False,
-                    "error": error_message,
-                    "detected_language": self.current_language
-                }
-
-            try:
-                with tempfile.NamedTemporaryFile(delete=False, suffix=f'.{file_extension}') as temp_audio:
-                    logger.info(f"Creating temporary file: {temp_audio.name}")
-                    audio_file.seek(0)
-                    chunk_size = 8192
-                    while True:
-                        chunk = audio_file.read(chunk_size)
-                        if not chunk:
-                            break
-                        temp_audio.write(chunk)
-                    temp_path = Path(temp_audio.name)
-
-                logger.info("Temporary file created successfully")
-
-                if not temp_path.exists() or temp_path.stat().st_size == 0:
-                    logger.error("Temporary file is empty or doesn't exist")
-                    error_message = self.get_bot_response('error_temp_file')
-                    return {
-                        "success": False,
-                        "error": error_message,
-                        "detected_language": self.current_language
-                    }
-
-                logger.info("Starting transcription with Whisper")
-                with open(temp_path, 'rb') as audio:
-                    transcript = self.client.audio.transcriptions.create(
-                        model="whisper-1",
-                        file=audio,
-                        response_format="verbose_json",
-                        temperature=0.7
-                    )
-
-                logger.info("Transcription completed successfully")
-                transcribed_text = transcript.text
-
-                self.current_language = self.detected_language_from_content(transcribed_text)
-                logger.info(f"Transcribed text: {transcribed_text}")
-                logger.info(f"Detected language from content: {self.current_language}")
-
-                if self.current_language == "unknown":
-                    self.current_language = self.detected_language_from_content(transcribed_text)
-                    if self.current_language == "unknown":
-                        self.current_language = "en"
-                        logger.warning("Language could not be detected, defaulting to English")
-
-                logger.info("Identifying region")
-                region_result = self.identify_region(transcribed_text)
-                logger.info(f"Region identification result: {region_result}")
-
-                if region_result['success']:
-                    response_message = self.get_bot_response(
-                        "region_prompt",
-                        region_result['region']
-                    )
-
-                    return {
-                        "success": True,
-                        "transcription": transcribed_text,
-                        "detected_language": self.current_language,
-                        "region": region_result['region'],
-                        "step": "region",
-                        "next_action": "request_sector",
-                        "message": response_message
-                    }
-                else:
-                    # Error en reconocimiento de región
-                    error_message = self.get_bot_response('error_voice_recognition')
-                    return {
-                        "success": False,
-                        "message": error_message,
-                        "detected_language": self.current_language
-                    }
-
-            finally:
-                if 'temp_path' in locals() and temp_path.exists():
-                    try:
-                        temp_path.unlink()
-                        logger.info("Temporary file cleaned up successfully")
-                    except Exception as e:
-                        logger.error(f"Error cleaning up temporary file: {e}")
+            return {
+                "success": True,
+                "transcription": transcribed_text,
+                "detected_language": "es"
+            }
 
         except Exception as e:
             logger.error(f"Error processing voice input: {str(e)}")
-            error_message = self.get_bot_response('error_general')
             return {
                 "success": False,
-                "message": error_message,
-                "detected_language": self.current_language
+                "error": str(e)
             }
+        finally:
+            # Limpieza del archivo temporal
+            if temp_path and temp_path.exists():
+                try:
+                    temp_path.unlink()
+                except Exception as e:
+                    logger.error(f"Error deleting temporary file: {str(e)}")
+    
+
 
     def process_sector_input(self, audio_file: BinaryIO, previous_region: str) -> Dict:
+        temp_path = None
         try:
+            # Validación del archivo
+            if not audio_file or not hasattr(audio_file, 'filename'):
+                return {
+                    "success": False,
+                    "error": self.get_bot_response('error_no_audio')
+                }
+
             filename = audio_file.filename.lower()
             valid_formats = ['flac', 'm4a', 'mp3', 'mp4', 'mpeg', 'mpga', 'oga', 'ogg', 'wav', 'webm']
             file_extension = filename.split('.')[-1] if '.' in filename else ''
@@ -463,96 +393,199 @@ class ChatGPTHelper:
                     "error": f"Invalid file format. Supported formats: {valid_formats}"
                 }
 
+            # Procesar archivo de audio
             with tempfile.NamedTemporaryFile(delete=False, suffix=f'.{file_extension}') as temp_audio:
+                audio_file.seek(0)
                 temp_audio.write(audio_file.read())
                 temp_path = Path(temp_audio.name)
 
-            try:
-                with open(temp_path, 'rb') as audio:
-                    transcript = self.client.audio.transcriptions.create(
-                        model="whisper-1",
-                        file=audio,
-                        response_format="verbose_json",
-                        temperature=0.7
-                    )
+            # Transcribir audio
+            with open(temp_path, 'rb') as audio:
+                transcript = self.client.audio.transcriptions.create(
+                    model="whisper-1",
+                    file=audio,
+                    response_format="verbose_json",
+                    temperature=0.7
+                )
 
-                transcribed_text = transcript.text.strip()
-                detected_language = "en" if any(word in transcribed_text.lower() for word in ['the', 'in', 'at', 'on']) else "es"
+            transcribed_text = transcript.text.strip()
+            self.current_language = self.detected_language_from_content(transcribed_text)
 
-                # Validación simple y directa del sector
-                if transcribed_text.lower() in [s.lower() for s in VALID_SECTORS]:
-                    sector = next(s for s in VALID_SECTORS if s.lower() == transcribed_text.lower())
-                    
+            # Usar translate_sector para procesar el sector
+            sector_result = self.translate_sector(transcribed_text)
+            
+            if sector_result['success']:
+                if sector_result['is_valid']:
+                    # Si el sector es válido, obtener las compañías
                     companies_result = self.get_companies_suggestions(
-                        sector=sector,
+                        sector=sector_result['translated_sector'],
                         geography=previous_region
                     )
 
+                    if companies_result['success']:
+                        return {
+                            "success": True,
+                            "transcription": transcribed_text,
+                            "detected_language": self.current_language,
+                            "region": previous_region,
+                            "sector": sector_result['translated_sector'],
+                            "displayed_sector": sector_result['displayed_sector'],
+                            "companies": companies_result['content'],
+                            "messages": companies_result['messages'],
+                            "step": "complete"
+                        }
+                    else:
+                        return {
+                            "success": False,
+                            "error": companies_result.get('error', self.get_bot_response('error_general')),
+                            "detected_language": self.current_language
+                        }
+                else:
+                    # Si el sector no es válido, devolver mensaje de error
                     return {
-                        "success": True,
-                        "transcription": transcribed_text,
-                        "detected_language": detected_language,
-                        "region": previous_region,
-                        "sector": sector,
-                        "companies": companies_result['content'],
-                        "step": "complete"
+                        "success": False,
+                        "message": self.get_bot_response('sector_invalid', sector_result.get('available_sectors')),
+                        "detected_language": self.current_language
                     }
-
+            else:
                 return {
                     "success": False,
-                    "message": f"Invalid sector. Please choose from: {', '.join(VALID_SECTORS)}",
-                    "detected_language": detected_language
+                    "error": sector_result.get('error', self.get_bot_response('error_general')),
+                    "detected_language": self.current_language
                 }
-
-            finally:
-                if temp_path.exists():
-                    temp_path.unlink()
 
         except Exception as e:
             logger.error(f"Error processing sector input: {str(e)}")
             return {
                 "success": False,
-                "error": str(e)
+                "error": self.get_bot_response('error_general'),
+                "detected_language": self.current_language if hasattr(self, 'current_language') else 'en'
             }
+        finally:
+            if temp_path and temp_path.exists():
+                try:
+                    temp_path.unlink()
+                except Exception as e:
+                    logger.error(f"Error deleting temporary file: {str(e)}")
+
+
+
+
+
+
+
+
+
+
+
+
     def process_text_input(self, text: str) -> Dict:
         try:
-            # Detectar y establecer el idioma
-            detected_language = self.detected_language_from_content(text)
-            self.current_language = detected_language  # Importante: establecer el idioma actual
+            # Usar el endpoint de detección de idioma
+            detect_response = requests.post(
+                API_ENDPOINTS["detect_language"],
+                json={'text': text},
+                headers={'Content-Type': 'application/json'}
+            )
             
-            # Identificar la región
-            region_result = self.identify_region(text)
-            
-            if region_result['success']:
-                # Obtener la respuesta en el idioma detectado
-                response_message = self.get_bot_response(
-                    "region_prompt",
-                    region_result['region']
-                )
+            if detect_response.status_code == 200:
+                detected_language = detect_response.json()['detected_language']
+                self.current_language = detected_language
                 
-                return {
-                    "success": True,
-                    "text": text,
-                    "detected_language": self.current_language,
-                    "region": region_result['region'],
-                    "step": "region",
-                    "next_action": "request_sector",
-                    "message": response_message,
-                    "language": self.current_language  # Agregar el idioma en la respuesta
-                }
-            else:
-                error_message = self.get_bot_response('error_general')
-                return {
-                    "success": False,
-                    "message": error_message,
-                    "detected_language": self.current_language
-                }
+                # Si el texto no está en inglés, traducirlo para procesamiento
+                if detected_language != 'en':
+                    translate_response = requests.post(
+                        API_ENDPOINTS["translate"],
+                        json={
+                            'text': text,
+                            'target_language': 'english'
+                        },
+                        headers={'Content-Type': 'application/json'}
+                    )
                     
+                    if translate_response.status_code == 200:
+                        text_for_processing = translate_response.json()['translated_text']
+                    else:
+                        text_for_processing = text
+                else:
+                    text_for_processing = text
+
+                # Identificar la región usando el texto en inglés
+                region_result = self.identify_region(text_for_processing)
+                
+                if region_result['success']:
+                    # Preparar el mensaje base en inglés
+                    base_message = BOT_MESSAGES["region_prompt"].format(region_result['region'])
+                    # Traducir la respuesta al idioma detectado si es necesario
+                    if detected_language != 'en':
+                        translate_response = requests.post(
+                            API_ENDPOINTS["translate"],
+                            json={
+                                'text': base_message,
+                                'target_language': detected_language
+                            },
+                            headers={'Content-Type': 'application/json'}
+                        )
+                        
+                        if translate_response.status_code == 200:
+                            translated_message = translate_response.json()['translated_text']
+                        else:
+                            translated_message = base_message
+                    else:
+                        translated_message = base_message
+                    
+                    return {
+                        "success": True,
+                        "text": text,
+                        "detected_language": detected_language,
+                        "region": region_result['region'],
+                        "step": "region",
+                        "next_action": "request_sector",
+                        "message": translated_message,
+                        "language": detected_language
+                    }
+                else:
+                    error_message = self.get_bot_response('error_general')
+                    return {
+                        "success": False,
+                        "message": error_message,
+                        "detected_language": detected_language
+                    }
+            
+            else:
+                # Fallback al método original si el endpoint falla
+                return self._process_text_input_fallback(text)
+                        
         except Exception as e:
             logger.error(f"Error processing text input: {str(e)}")
+            return self._process_text_input_fallback(text)
+    def _process_text_input_fallback(self, text: str) -> Dict:
+        # Método de respaldo que usa la implementación original
+        detected_language = self.detected_language_from_content(text)
+        self.current_language = detected_language
+        
+        region_result = self.identify_region(text)
+        
+        if region_result['success']:
+            response_message = self.get_bot_response(
+                "region_prompt",
+                region_result['region']
+            )
+            
+            return {
+                "success": True,
+                "text": text,
+                "detected_language": detected_language,
+                "region": region_result['region'],
+                "step": "region",
+                "next_action": "request_sector",
+                "message": response_message,
+                "language": detected_language
+            }
+        else:
             error_message = self.get_bot_response('error_general')
             return {
                 "success": False,
                 "message": error_message,
-                "detected_language": self.current_language
+                "detected_language": detected_language
             }
