@@ -608,24 +608,23 @@ def company_suggestions_test():
     try:
         data = request.json
         
-        # Validación actualizada para usar processed_region
-        if 'sector' not in data or 'processed_region' not in data:
-            base_error = 'Sector and region are required'
+        # Validación de campos requeridos
+        required_fields = ['sector', 'processed_region']
+        if not all(field in data for field in required_fields):
             return jsonify({
                 'success': False,
-                'message': base_error
+                'message': 'Sector and region are required'
             }), 400
 
+        # Inicialización de variables y configuración
         chatgpt = ChatGPTHelper()
         sector = data['sector']
         location = data['processed_region']
         detected_language = data.get('language', 'en')
-        
-        # Obtener las compañías del request si existen
         interested_in_companies = data.get('interested_in_companies', False)
         companies_list = data.get('companies', [])
 
-        # Definir compañías ficticias para el sector de tecnología
+        # Definición de compañías ficticias para el sector tecnológico
         TECH_FICTIONAL_COMPANIES = [
             "Company 1 Tech Solutions",
             "Company 2 Digital Systems",
@@ -638,18 +637,15 @@ def company_suggestions_test():
             geography=location
         )
 
-        # Modificar las sugerencias si el sector es tecnología
+        # Procesamiento de compañías según el sector
         if sector.lower() in ['technology', 'tecnología', 'tech', 'tecnologia']:
-            # Combinar compañías ficticias con las sugerencias de ChatGPT
             all_companies = TECH_FICTIONAL_COMPANIES + chatgpt_result['content']
         else:
             all_companies = chatgpt_result['content']
 
-        # Si hay compañías específicas de interés
+        # Procesamiento de compañías de interés
         if interested_in_companies and companies_list:
-            # Primero, eliminar las compañías de interés si ya existen en la lista
             final_companies = [comp for comp in all_companies if comp not in companies_list]
-            # Luego, agregar las compañías de interés al principio
             final_companies = companies_list + final_companies
         else:
             final_companies = all_companies
@@ -657,25 +653,32 @@ def company_suggestions_test():
         # Limitar a 20 compañías
         final_companies = final_companies[:20]
 
-        # Preparar mensaje según el caso
+        # Preparación del mensaje de respuesta
         if interested_in_companies and companies_list:
             companies_str = ", ".join(companies_list)
             base_message = f"Hemos registrado su interés en las siguientes empresas: {companies_str}."
         else:
             base_message = f"Empresas sugeridas para el sector {sector} en {location}."
 
-        # Traducir mensaje si es necesario
+        # Traducción del mensaje según el idioma
         if detected_language != 'es':
             message = chatgpt.translate_message(base_message, detected_language)
         else:
             message = base_message
+
+        # Agregar pregunta de confirmación
+        confirmation_question = "\n\n¿Estás de acuerdo con esta lista?"
+        if detected_language != 'es':
+            confirmation_question = chatgpt.translate_message(confirmation_question, detected_language)
+
+        final_message = message + confirmation_question
 
         return jsonify({
             'success': True,
             'companies': final_companies,
             'interested_in_companies': interested_in_companies,
             'language': detected_language,
-            'message': message
+            'message': final_message
         })
 
     except Exception as e:
@@ -787,6 +790,8 @@ def specify_employment_status():
             'language': detected_language
         }), 500
     
+
+
 
 @app.route('/api/exclude-companies', methods=['POST'])
 def exclude_companies():
