@@ -1,6 +1,6 @@
 import functions_framework
 from flask import jsonify
-from src.handlers.email_handler import handle_email_capture
+from src.handlers.phase1_handlers.email_handler import handle_email_capture
 from src.handlers.sector_handler import handle_sector_capture
 from src.handlers.geography_handler import handle_geography_capture
 

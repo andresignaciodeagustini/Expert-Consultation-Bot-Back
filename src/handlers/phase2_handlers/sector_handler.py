@@ -1,5 +1,5 @@
 from flask import jsonify
-from ..utils.chatgpt_helper import ChatGPTHelper
+from src.utils.chatgpt_helper import ChatGPTHelper
 
 def handle_sector_capture(request_json):
     chatgpt = ChatGPTHelper()

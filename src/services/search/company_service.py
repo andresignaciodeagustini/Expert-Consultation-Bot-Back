@@ -1,7 +1,7 @@
 from openai import OpenAI
 from typing import Dict
 import uuid
-from .zoho_services import ZohoService
+from ..external.zoho_services import ZohoService
 
 class CompanyService:
     def __init__(self, api_key: str):

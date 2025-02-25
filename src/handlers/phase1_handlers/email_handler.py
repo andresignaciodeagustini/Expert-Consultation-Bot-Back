@@ -1,6 +1,6 @@
 from flask import jsonify
 import random
-from ..utils.constants import CLIENT_DOMAINS
+from ...utils.constants import CLIENT_DOMAINS
 
 
 
