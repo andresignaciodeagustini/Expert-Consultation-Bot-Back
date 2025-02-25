@@ -181,11 +181,12 @@ def refresh_token():
 
 
 REGISTERED_TEST_EMAILS = [
-    "test1@test.com",        # Inglés
-    "prueba1@test.com",      # Español
-    "essai1@test.com",       # Francés
-    "prova1@test.com",       # Italiano
-    "versuch1@test.com"      # Alemán
+    "test@test.com",        # Inglés
+    "prueba@prueba.com",      # Español
+    "essai@essai.com",       # Francés
+    "prova@essai.com",       # Italiano
+    "versuch@essai.com",
+    "测试@测试.com"      # Alemán
 ]
 def is_email_registered(email: str) -> bool:
     """
@@ -346,44 +347,89 @@ def ask_expert_connection():
                 'message': 'Required fields missing: text, name, detected_language'
             }), 400
 
-        # Limpiar el texto de signos de puntuación y convertir a minúsculas
+        # Diccionario de respuestas afirmativas en diferentes idiomas
+        affirmative_responses = {
+            'en': ['yes', 'yeah', 'yep', 'sure'],
+            'es': ['si', 'sí', 'claro', 'por supuesto'],
+            'it': ['si', 'sì', 'certo'],
+            'fr': ['oui', 'ouais', 'bien sûr'],
+            'de': ['ja', 'jawohl', 'natürlich'],
+            'zh': ['是的', '是', '对', '好的', '好', '可以', '行', 'shi', 'dui', 'hao', 'keyi', 'xing']
+        }
+
+        # Diccionario de respuestas negativas en diferentes idiomas
+        negative_responses = {
+            'en': ['no', 'nope', 'not'],
+            'es': ['no'],
+            'it': ['no', 'non'],
+            'fr': ['non', 'pas'],
+            'de': ['nein', 'nicht'],
+            'zh': ['不', '不是', '否', '不要', '不行', '不可以', 'bu', 'bushi', 'fou', 'buyao', 'buxing', 'bukeyi']
+        }
+
         text = ''.join(char for char in data['text'] if char.isalnum() or char.isspace()).lower().strip()
         name = data['name']
         detected_language = data['detected_language']
         
         chatgpt = ChatGPTHelper()
 
-        # Verificar si la respuesta es afirmativa
-        if text == 'yes':
+        # Verificar si la respuesta es afirmativa o negativa en cualquier idioma
+        is_affirmative = any(text in responses for responses in affirmative_responses.values())
+        is_negative = any(text in responses for responses in negative_responses.values())
+
+        if is_affirmative:
+            # Mensaje base en inglés
             base_message = f"Excellent {name}! What sector interests you the most? Choose from:\n\n1. Technology\n2. Healthcare\n3. Finance\n4. Education\n5. Other"
-            next_message = chatgpt.translate_message(base_message, detected_language)
+            
+            # Traducir el mensaje según el idioma detectado
+            translated_message = chatgpt.translate_message(base_message, detected_language)
             
             return jsonify({
                 'success': True,
                 'name': name,
                 'detected_language': detected_language,
                 'step': 'select_sector',
-                'message': next_message,
+                'message': translated_message,
                 'next_action': 'process_sector_selection'
             })
-        else:
+        
+        elif is_negative:
+            # Mensaje base en inglés
             base_message = f"I understand, {name}. Feel free to come back when you'd like to connect with our experts. Have a great day!"
-            farewell_message = chatgpt.translate_message(base_message, detected_language)
+            
+            # Traducir el mensaje según el idioma detectado
+            translated_message = chatgpt.translate_message(base_message, detected_language)
             
             return jsonify({
                 'success': True,
                 'name': name,
                 'detected_language': detected_language,
                 'step': 'farewell',
-                'message': farewell_message,
+                'message': translated_message,
                 'next_action': 'end_conversation'
+            })
+        
+        else:
+            # Mensaje base en inglés para respuestas poco claras
+            base_message = "I'm not sure if that's a yes or no. Could you please clarify?"
+            
+            # Traducir el mensaje según el idioma detectado
+            translated_message = chatgpt.translate_message(base_message, detected_language)
+            
+            return jsonify({
+                'success': True,
+                'message': translated_message,
+                'detected_language': detected_language,
+                'step': 'clarify'
             })
 
     except Exception as e:
         print(f"Error in expert connection answer: {str(e)}")
+        error_message = "An error occurred while processing your request."
+        translated_error = chatgpt.translate_message(error_message, detected_language)
         return jsonify({
             'success': False,
-            'error': "An error occurred while processing your request."
+            'error': translated_error
         }), 500
 #############################################################################################################3
 #############################################################################################################
@@ -468,17 +514,24 @@ def test_process_text():
 
         chatgpt = ChatGPTHelper()
         
+        # Get the language from the request
+        detected_language = data.get('language', 'en')
+        
         # Process the region response
         text = data['text']
         region = text.strip().lower()
         
-        # After getting the region, now ask for companies
+        # Base message in English
         follow_up_message = "Thank you for specifying the region. Are there specific companies where you would like experts to have experience? Please enter the names separated by commas or answer 'no'."
+        
+        # Translate the message according to the detected language
+        translated_message = chatgpt.translate_message(follow_up_message, detected_language)
         
         result = {
             'success': True,
             'processed_region': region,
-            'next_question': follow_up_message
+            'next_question': translated_message,  # Use the translated message
+            'language': detected_language  # Include the language in the response
         }
         
         return jsonify(result)
@@ -565,23 +618,19 @@ def company_suggestions_test():
 
         chatgpt = ChatGPTHelper()
         sector = data['sector']
-        location = data['processed_region']  # Usando processed_region
+        location = data['processed_region']
         detected_language = data.get('language', 'en')
+        
+        # Obtener las compañías del request si existen
+        interested_in_companies = data.get('interested_in_companies', False)
+        companies_list = data.get('companies', [])
 
-        # Manejo de experience_type basado en companies
-        experience_type = None
-        if 'interested_in_companies' in data and data['interested_in_companies']:
-            experience_type = 'specific_companies'
-            companies = data.get('companies', [])
-
-        # Mensajes base en inglés
-        BASE_MESSAGES = {
-            'companies_found': "Found {sector} companies in {location}",
-            'companies_found_with_experience': "Found {sector} companies in {location} specialized in {experience_type}",
-            'processing_error': "An error occurred while processing your request",
-            'no_companies_found': "No companies found for the specified criteria",
-            'invalid_parameters': "Sector and region are required"
-        }
+        # Definir compañías ficticias para el sector de tecnología
+        TECH_FICTIONAL_COMPANIES = [
+            "Company 1 Tech Solutions",
+            "Company 2 Digital Systems",
+            "Company 3 Innovation Labs"
+        ]
 
         # Obtener sugerencias de ChatGPT
         chatgpt_result = chatgpt.get_companies_suggestions(
@@ -589,63 +638,57 @@ def company_suggestions_test():
             geography=location
         )
 
-        # Verificar si se encontraron compañías
-        if not chatgpt_result.get('content'):
-            base_message = BASE_MESSAGES['no_companies_found']
-            response_message = chatgpt.translate_message(base_message, detected_language)
-            return jsonify({
-                'success': False,
-                'message': response_message,
-                'detected_language': detected_language
-            }), 404
-
-        # Preparar mensaje de respuesta
-        if experience_type:
-            base_message = BASE_MESSAGES['companies_found_with_experience'].format(
-                sector=sector,
-                location=location,
-                experience_type=experience_type
-            )
+        # Modificar las sugerencias si el sector es tecnología
+        if sector.lower() in ['technology', 'tecnología', 'tech', 'tecnologia']:
+            # Combinar compañías ficticias con las sugerencias de ChatGPT
+            all_companies = TECH_FICTIONAL_COMPANIES + chatgpt_result['content']
         else:
-            base_message = BASE_MESSAGES['companies_found'].format(
-                sector=sector,
-                location=location
-            )
+            all_companies = chatgpt_result['content']
 
-        # Traducir mensaje de respuesta
-        response_message = chatgpt.translate_message(base_message, detected_language)
+        # Si hay compañías específicas de interés
+        if interested_in_companies and companies_list:
+            # Primero, eliminar las compañías de interés si ya existen en la lista
+            final_companies = [comp for comp in all_companies if comp not in companies_list]
+            # Luego, agregar las compañías de interés al principio
+            final_companies = companies_list + final_companies
+        else:
+            final_companies = all_companies
 
-        # Traducir nombres de campos
-        translated_sector = chatgpt.translate_message("Sector", detected_language)
-        translated_experience = chatgpt.translate_message("Experience Type", detected_language)
-        translated_region = chatgpt.translate_message("Region", detected_language)
-        translated_companies = chatgpt.translate_message("Companies", detected_language)
+        # Limitar a 20 compañías
+        final_companies = final_companies[:20]
+
+        # Preparar mensaje según el caso
+        if interested_in_companies and companies_list:
+            companies_str = ", ".join(companies_list)
+            base_message = f"Hemos registrado su interés en las siguientes empresas: {companies_str}."
+        else:
+            base_message = f"Empresas sugeridas para el sector {sector} en {location}."
+
+        # Traducir mensaje si es necesario
+        if detected_language != 'es':
+            message = chatgpt.translate_message(base_message, detected_language)
+        else:
+            message = base_message
 
         return jsonify({
             'success': True,
-            'message': response_message,
-            'detected_language': detected_language,
-            translated_region: location,
-            translated_sector: {
-                'name': sector,
-                translated_experience: experience_type
-            },
-            translated_companies: {
-                'suggestions': [{"name": company} for company in chatgpt_result['content']],
-                'total_count': len(chatgpt_result['content'])
-            }
+            'companies': final_companies,
+            'interested_in_companies': interested_in_companies,
+            'language': detected_language,
+            'message': message
         })
 
     except Exception as e:
         print(f"Error in company suggestions: {str(e)}")
-        error_message = chatgpt.translate_message(
-            BASE_MESSAGES['processing_error'],
-            detected_language if 'detected_language' in locals() else 'en'
-        )
+        error_message = "Ha ocurrido un error al procesar su solicitud."
+        if detected_language != 'es':
+            error_message = chatgpt.translate_message(error_message, detected_language)
         return jsonify({
             'success': False,
             'message': error_message,
-            'error': str(e)
+            'companies': [],
+            'interested_in_companies': False,
+            'language': detected_language if 'detected_language' in locals() else 'en'
         }), 500
     """"""""""""""""""""""""""""""""""""""""2"""
 ######################################################################################################

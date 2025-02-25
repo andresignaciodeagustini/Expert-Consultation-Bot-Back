@@ -225,6 +225,11 @@ class ChatGPTHelper:
                 "success": False,
                 "error": str(e)
             }
+        
+
+
+
+
     def get_companies_suggestions(
         self,
         sector: str,
@@ -234,14 +239,17 @@ class ChatGPTHelper:
         try:
             logger.info(f"Generating companies for sector: {sector}, geography: {geography}")
 
+            # Modificar el prompt para ser más específico con la ubicación
             messages = [
                 {
                     "role": "system",
-                    "content": "You are a professional business analyst that provides accurate lists of companies based on sector and geography."
+                    "content": """You are a professional business analyst that provides accurate lists of companies.
+                    When given a sector and location, provide real companies that operate in that specific location.
+                    If the location is not specific enough or invalid, indicate that in your response."""
                 },
                 {
                     "role": "user",
-                    "content": f"List exactly 20 major companies in the {sector} sector that operate in {geography}. Only provide the company names separated by commas."
+                    "content": f"List exactly 20 real companies in the {sector} sector that have significant operations or presence in {geography}. If {geography} is not a valid or specific location, please indicate that. Only provide the company names separated by commas, or indicate if the location is invalid."
                 }
             ]
 
@@ -253,11 +261,12 @@ class ChatGPTHelper:
             )
 
             content = response.choices[0].message.content
-            if content is None:
-                logger.info("Received None response from API")
-                error_message = self.get_bot_response('error_no_companies')
+            if content is None or "invalid" in content.lower() or "didn't specify" in content.lower():
+                logger.info("Invalid or unspecified location")
+                error_message = f"Please provide a more specific location for {sector} companies."
                 return {
-                    "success": True,
+                    "success": False,
+                    "error": error_message,
                     "content": [],
                     "contentId": str(uuid.uuid4()),
                     "messages": {
@@ -319,6 +328,19 @@ class ChatGPTHelper:
                 "detected_language": self.current_language
             }
         
+
+
+
+
+
+
+
+
+
+
+
+
+
 
         
     def process_voice_input(self, audio_file: BinaryIO, step: str = 'transcribe') -> Dict:
