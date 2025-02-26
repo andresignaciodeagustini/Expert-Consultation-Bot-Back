@@ -718,11 +718,25 @@ def specify_employment_status():
             'processing_error': "Error processing your response"
         }
 
-        # Función auxiliar para obtener el mensaje según el idioma
         def get_message(message):
             if detected_language == 'en':
                 return message
             return chatgpt.translate_message(message, detected_language)
+
+        def normalize_status(status_text):
+            status_text = status_text.strip().lower()
+            
+            status_mapping = {
+                'current': ['current', 'currently', 'presente', 'actual', 'now', 'present'],
+                'previous': ['previous', 'previously', 'former', 'past', 'anterior', 'antes'],
+                'both': ['both', 'all', 'todos', 'ambos', 'both options', 'all options']
+            }
+            
+            for status, variants in status_mapping.items():
+                if any(variant in status_text for variant in variants):
+                    return status
+                    
+            return None
 
         # Si no hay status, devolver la pregunta
         if 'status' not in data:
@@ -733,28 +747,15 @@ def specify_employment_status():
                 'language': detected_language
             })
 
-        # Verificar si la respuesta es válida en inglés
-        valid_options = ['current', 'previous', 'both']
+        # Normalizar el status recibido
         user_status = data['status'].strip().lower()
+        status = normalize_status(user_status)
 
-        if user_status in valid_options:
-            status = user_status
-        else:
-            # Solo usar la normalización si no es inglés o no es una respuesta válida
-            if detected_language == 'en':
-                status = None
-            else:
-                normalize_prompt = BASE_MESSAGES['normalize_prompt'] + data['status']
-                normalized_status = chatgpt.translate_message(normalize_prompt, 'en').strip().lower()
-                
-                if 'current' in normalized_status:
-                    status = 'current'
-                elif 'previous' in normalized_status:
-                    status = 'previous'
-                elif 'both' in normalized_status:
-                    status = 'both'
-                else:
-                    status = None
+        # Si no se pudo normalizar y no es inglés, intentar con ChatGPT
+        if status is None and detected_language != 'en':
+            normalize_prompt = BASE_MESSAGES['normalize_prompt'] + data['status']
+            normalized_status = chatgpt.translate_message(normalize_prompt, 'en').strip().lower()
+            status = normalize_status(normalized_status)
 
         if status:
             status_message = BASE_MESSAGES['status_options'][status]
@@ -785,6 +786,8 @@ def specify_employment_status():
             'error': str(e),
             'language': detected_language
         }), 500
+
+
 
 
 @app.route('/api/exclude-companies', methods=['POST'])
@@ -1116,8 +1119,6 @@ def evaluation_questions_sections():
             'message': error_message,
             'error': str(e)
         }), 500
-
-
 @app.route('/api/industry-experts', methods=['POST'])
 def industry_experts():
     try:
@@ -1129,6 +1130,7 @@ def industry_experts():
         # Inicializar ChatGPTHelper y configurar idioma
         chatgpt = ChatGPTHelper()
         detected_language = data.get('language', 'en')
+        print("1. Initial language detection:", detected_language)
 
         # Mensajes base en inglés
         BASE_MESSAGES = {
@@ -1197,6 +1199,7 @@ def industry_experts():
                 'relevance_score': 0.9
             }
         ]
+        print("2. Base experts before processing:", base_experts)
 
         # Agregar expertos de prueba si es tecnología en Norteamérica
         if phase2_data['sector'].lower() == 'technology' and 'north america' in phase2_data['processed_region'].lower():
@@ -1220,7 +1223,9 @@ def industry_experts():
                     'relevance_score': 0.92
                 }
             ]
+            print("3. Test experts before adding:", test_experts)
             base_experts.extend(test_experts)
+            print("4. Combined experts after extension:", base_experts)
 
         # Datos de ejemplo de expertos
         categorized_experts = {
@@ -1248,6 +1253,7 @@ def industry_experts():
                 }
             ]
         }
+        print("5. Initial categorized_experts:", categorized_experts)
 
         # Ordenar cada categoría por relevance_score
         for category in categorized_experts:
@@ -1256,6 +1262,7 @@ def industry_experts():
                 key=lambda x: x.get('relevance_score', 0),
                 reverse=True
             )[:30]
+        print("6. Categorized experts after sorting:", categorized_experts)
 
         # Definir títulos para cada categoría
         category_titles = {
@@ -1269,8 +1276,8 @@ def industry_experts():
             detected_language
         )
 
-        # Formatear respuesta con títulos incluidos
-        return jsonify({
+        # Formatear respuesta final
+        final_response = {
             'success': True,
             'experts_by_category': {
                 'companies': {
@@ -1298,7 +1305,10 @@ def industry_experts():
             },
             'selection_message': selection_message,
             'detected_language': detected_language
-        })
+        }
+        print("7. Final response data:", final_response)
+
+        return jsonify(final_response)
 
     except Exception as e:
         print(f"Error in industry experts: {str(e)}")
@@ -1316,65 +1326,107 @@ def industry_experts():
 
 
 
+
+
 @app.route('/api/select-experts', methods=['POST'])
 def select_experts():
     try:
         data = request.json
-        selected_experts = data.get('selected_experts')  # Cambio aquí
-        all_experts_data = data.get('all_experts_data')  # Cambio aquí
+        selected_experts = data.get('selected_experts')
+        all_experts_data = data.get('all_experts_data')
+        evaluation_questions = data.get('evaluation_questions', {})
+        detected_language = data.get('all_experts_data', {}).get('detected_language', 'en')# Obtener el idioma detectado
         
+        chatgpt = ChatGPTHelper()  # Instanciar el helper para traducciones
+
+        # Mensajes base en inglés
+        BASE_MESSAGES = {
+            'expert_required': 'At least one expert must be selected',
+            'no_data_found': 'No expert data found',
+            'expert_selected': 'You have selected the expert {name}.',
+            'expert_not_found': 'No expert found with the name {name}',
+            'processing_error': 'An error occurred while processing your request.',
+            'thank_you': 'Thank you for contacting us! We will get in touch with you shortly.'
+        }
+
         if not selected_experts:
             return jsonify({
                 'success': False,
-                'message': 'Se requiere al menos un experto seleccionado'
+                'message': chatgpt.translate_message(BASE_MESSAGES['expert_required'], detected_language)
             }), 400
 
         if not all_experts_data:
             return jsonify({
                 'success': False,
-                'message': 'No se encontraron datos de expertos'
+                'message': chatgpt.translate_message(BASE_MESSAGES['no_data_found'], detected_language)
             }), 400
 
         # Buscar el experto en todas las categorías
         selected_expert = None
         for category in all_experts_data['experts_by_category'].values():
             for expert in category['experts']:
-                if expert['name'].lower() == selected_experts[0].lower():  # Tomamos el primer experto del array
+                if expert['name'].lower() == selected_experts[0].lower():
                     selected_expert = expert
                     break
             if selected_expert:
                 break
 
         if selected_expert:
-            return jsonify({
+            # Traducir mensajes principales
+            selection_message = chatgpt.translate_message(
+                BASE_MESSAGES['expert_selected'].format(name=selected_experts[0]),
+                detected_language
+            )
+            
+            # Prints para debug de traducción
+            print(f"Detected language: {detected_language}")
+            print(f"Original thank you message: {BASE_MESSAGES['thank_you']}")
+            
+            # Prueba de consistencia de traducción
+            test_translation1 = chatgpt.translate_message(BASE_MESSAGES['thank_you'], detected_language)
+            test_translation2 = chatgpt.translate_message(BASE_MESSAGES['thank_you'], detected_language)
+            print(f"Test translation 1: {test_translation1}")
+            print(f"Test translation 2: {test_translation2}")
+            
+            thank_you_message = chatgpt.translate_message(
+                BASE_MESSAGES['thank_you'],
+                detected_language
+            )
+            print(f"Translated thank you message: {thank_you_message}")
+
+            response_data = {
                 'success': True,
-                'message': f'Has seleccionado al experto {selected_experts[0]}.',
-                'expert_details': selected_expert
-            })
+                'message': selection_message,
+                'expert_details': selected_expert,
+                'final_message': thank_you_message,
+                'detected_language': detected_language
+            }
+            
+            if evaluation_questions:
+                response_data['evaluation_questions'] = evaluation_questions
+
+            print(f"Response data being sent: {response_data}")
+            return jsonify(response_data)
         else:
+            not_found_message = chatgpt.translate_message(
+                BASE_MESSAGES['expert_not_found'].format(name=selected_experts[0]),
+                detected_language
+            )
             return jsonify({
                 'success': False,
-                'message': f'No se encontró ningún experto con el nombre {selected_experts[0]}'
+                'message': not_found_message
             }), 404
 
     except Exception as e:
+        error_message = chatgpt.translate_message(
+            BASE_MESSAGES['processing_error'],
+            detected_language if 'detected_language' in locals() else 'en'
+        )
         return jsonify({
             'success': False,
-            'message': 'Ocurrió un error al procesar tu solicitud.',
+            'message': error_message,
             'error': str(e)
         }), 500
-
-
-
-
-
-
-
-
-
-
-
-
 
 ################################################################################################3
 
