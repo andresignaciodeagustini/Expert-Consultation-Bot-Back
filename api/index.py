@@ -1118,8 +1118,6 @@ def evaluation_questions_sections():
         }), 500
 
 
-
-
 @app.route('/api/industry-experts', methods=['POST'])
 def industry_experts():
     try:
@@ -1137,10 +1135,7 @@ def industry_experts():
             'invalid_client_perspective': 'clientPerspective must be a boolean value or empty string',
             'invalid_employment_status': 'Invalid employment status. Must be one of: current, previous, or both',
             'missing_required_fields': 'Missing required fields: sector and processed_region',
-            'processing_error': 'An error occurred while processing your request.',
-            'company_experts': 'Company Experts',
-            'client_perspective_experts': 'Client Perspective Experts',
-            'supply_chain_experts': 'Supply Chain Experts'
+            'processing_error': 'An error occurred while processing your request.'
         }
         
         # Extraer datos de phase2Data y phase3Data
@@ -1262,27 +1257,32 @@ def industry_experts():
                 reverse=True
             )[:30]
 
-        # Traducir títulos de categorías
-        translated_titles = {
-            'companies': chatgpt.translate_message(BASE_MESSAGES['company_experts'], detected_language),
-            'clients': chatgpt.translate_message(BASE_MESSAGES['client_perspective_experts'], detected_language),
-            'suppliers': chatgpt.translate_message(BASE_MESSAGES['supply_chain_experts'], detected_language)
+        # Definir títulos para cada categoría
+        category_titles = {
+            'companies': chatgpt.translate_message('Company Experts', detected_language),
+            'clients': chatgpt.translate_message('Client Experts', detected_language),
+            'suppliers': chatgpt.translate_message('Supplier Experts', detected_language)
         }
 
-        # Formatear respuesta
+        selection_message = chatgpt.translate_message(
+            "To select an expert, please write their full name.",
+            detected_language
+        )
+
+        # Formatear respuesta con títulos incluidos
         return jsonify({
             'success': True,
             'experts_by_category': {
                 'companies': {
-                    'title': translated_titles['companies'],
+                    'title': category_titles['companies'],
                     'experts': categorized_experts['companies']
                 },
                 'clients': {
-                    'title': translated_titles['clients'],
+                    'title': category_titles['clients'],
                     'experts': categorized_experts['clients']
                 },
                 'suppliers': {
-                    'title': translated_titles['suppliers'],
+                    'title': category_titles['suppliers'],
                     'experts': categorized_experts['suppliers']
                 }
             },
@@ -1296,6 +1296,7 @@ def industry_experts():
                 'clientPerspective': phase3_data['clientPerspective'],
                 'supplyChainRequired': phase3_data['supplyChainRequired']
             },
+            'selection_message': selection_message,
             'detected_language': detected_language
         })
 
@@ -1310,7 +1311,8 @@ def industry_experts():
             'message': error_message,
             'error': str(e)
         }), 500
-#########################################
+
+
 
 
 
@@ -1318,73 +1320,49 @@ def industry_experts():
 def select_experts():
     try:
         data = request.json
-        selected_experts = data.get('selected_experts', [])  # Lista de nombres de expertos
-        all_experts_data = data.get('all_experts_data', {})  # Datos completos de expertos del endpoint anterior
+        selected_experts = data.get('selected_experts')  # Cambio aquí
+        all_experts_data = data.get('all_experts_data')  # Cambio aquí
         
-        if not selected_experts or not all_experts_data:
+        if not selected_experts:
             return jsonify({
                 'success': False,
-                'message': 'Missing required data: selected experts or experts data',
+                'message': 'Se requiere al menos un experto seleccionado'
             }), 400
 
-        # Función auxiliar para encontrar expertos por nombre
-        def find_expert(name, experts_data):
-            for category in experts_data['experts_by_category'].values():
-                for expert in category['experts']:
-                    if expert['name'].lower() == name.lower():
-                        return expert
-            return None
+        if not all_experts_data:
+            return jsonify({
+                'success': False,
+                'message': 'No se encontraron datos de expertos'
+            }), 400
 
-        # Recopilar detalles de los expertos seleccionados
-        selected_experts_details = []
-        not_found_experts = []
+        # Buscar el experto en todas las categorías
+        selected_expert = None
+        for category in all_experts_data['experts_by_category'].values():
+            for expert in category['experts']:
+                if expert['name'].lower() == selected_experts[0].lower():  # Tomamos el primer experto del array
+                    selected_expert = expert
+                    break
+            if selected_expert:
+                break
 
-        for expert_name in selected_experts:
-            expert_info = find_expert(expert_name, all_experts_data)
-            if expert_info:
-                selected_experts_details.append({
-                    'name': expert_info['name'],
-                    'role': expert_info['role'],
-                    'experience': expert_info['experience'],
-                    'companies_experience': expert_info['companies_experience'],
-                    'expertise': expert_info['expertise'],
-                    'region_experience': expert_info['region_experience'],
-                    'relevance_score': expert_info['relevance_score']
-                })
-            else:
-                not_found_experts.append(expert_name)
-
-        # Preparar respuesta
-        response = {
-            'success': True,
-            'selected_experts': selected_experts_details,
-            'total_selected': len(selected_experts_details)
-        }
-
-        # Agregar expertos no encontrados si los hay
-        if not_found_experts:
-            response['not_found_experts'] = not_found_experts
-
-        return jsonify(response)
+        if selected_expert:
+            return jsonify({
+                'success': True,
+                'message': f'Has seleccionado al experto {selected_experts[0]}.',
+                'expert_details': selected_expert
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'message': f'No se encontró ningún experto con el nombre {selected_experts[0]}'
+            }), 404
 
     except Exception as e:
         return jsonify({
             'success': False,
-            'message': 'An error occurred while processing your request.',
+            'message': 'Ocurrió un error al procesar tu solicitud.',
             'error': str(e)
         }), 500
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
