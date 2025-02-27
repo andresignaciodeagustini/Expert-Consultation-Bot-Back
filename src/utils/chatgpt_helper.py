@@ -611,3 +611,490 @@ class ChatGPTHelper:
                 "message": error_message,
                 "detected_language": detected_language
             }
+        
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        ####################################################
+
+        
+        
+
+    def extract_email(self, text: str) -> Dict:
+        try:
+            messages = [
+                {
+                    "role": "system",
+                    "content": """You are an email extractor. Your task is to find and return ONLY the email address from the input text.
+                    Rules:
+                    - Return ONLY the email address, nothing else
+                    - If multiple emails are found, return only the first one
+                    - If no email is found, return 'no_email'
+                    - Preserve the exact case of the email as provided
+                    Example inputs and outputs:
+                    Input: "My email is john.doe@example.com thanks"
+                    Output: john.doe@example.com
+                    Input: "Contact me at JANE@company.co.uk or other@email.com"
+                    Output: JANE@company.co.uk
+                    Input: "Hello, how are you?"
+                    Output: no_email"""
+                },
+                {
+                    "role": "user",
+                    "content": text
+                }
+            ]
+
+            response = self.client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=messages,
+                temperature=0,
+                max_tokens=50
+            )
+
+            extracted_email = response.choices[0].message.content.strip()
+            
+            if extracted_email == 'no_email':
+                return {
+                    "success": False,
+                    "error": "No email address found in the text",
+                    "email": None
+                }
+
+            return {
+                "success": True,
+                "email": extracted_email
+            }
+
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e),
+                "email": None
+            }
+        
+
+
+
+        
+    def extract_name(self, text: str) -> Dict:
+
+            try:
+                messages = [
+                    {
+                        "role": "system",
+                        "content": """You are a name extractor. Your task is to find and return ONLY the person's name from the input text.
+                        Rules:
+                        - Return ONLY the name, nothing else
+                        - Return the full name if provided (first name and last name)
+                        - If multiple names are found, return only the first one
+                        - If no name is found, return 'no_name'
+                        - Preserve the exact case of the name as provided
+                        - Do not include titles (Mr., Mrs., Dr., etc.)
+                        Example inputs and outputs:
+                        Input: "My name is John Doe"
+                        Output: John Doe
+                        Input: "Hello, I am María García"
+                        Output: María García
+                        Input: "Dr. James Smith here"
+                        Output: James Smith
+                        Input: "Just call me Bob"
+                        Output: Bob
+                        Input: "No name mentioned here"
+                        Output: no_name"""
+                    },
+                    {
+                        "role": "user",
+                        "content": text
+                    }
+                ]
+
+                response = self.client.chat.completions.create(
+                    model="gpt-3.5-turbo",
+                    messages=messages,
+                    temperature=0,
+                    max_tokens=50
+                )
+
+                extracted_name = response.choices[0].message.content.strip()
+                
+                if extracted_name == 'no_name':
+                    return {
+                        "success": False,
+                        "error": "No name found in the text",
+                        "name": None
+                    }
+
+                return {
+                    "success": True,
+                    "name": extracted_name
+                }
+
+            except Exception as e:
+
+                return {
+                    "success": False,
+                    "error": str(e),
+                    "name": None
+                }
+
+
+
+
+
+    def extract_intention(self, text: str) -> Dict:
+        try:
+            # Limpiar el texto de espacios y convertir a minúsculas
+            cleaned_text = text.strip().lower()
+            
+            # Verificar si el texto es exactamente "yes" o "no"
+            if cleaned_text == "yes" or cleaned_text == "no":
+                return {
+                    "success": True,
+                    "intention": cleaned_text
+                }
+                
+            messages = [
+                {
+                    "role": "system",
+                    "content": """You are a binary intention classifier. Your ONLY task is to determine if a text expresses YES or NO.
+
+    STRICT OUTPUT RULES:
+    - You MUST respond ONLY with one of these three words: "yes", "no", or "unclear"
+    - Never explain or add additional text
+    - If there's any ambiguity, respond with "unclear"
+
+    CLASSIFICATION RULES:
+    1. Classify as "yes" when the text:
+    - Expresses agreement, acceptance, or interest
+    - Shows willingness to proceed or continue
+    - Contains affirmative expressions in any language
+    - Uses positive emoji or symbols
+
+    2. Classify as "no" when the text:
+    - Expresses disagreement, rejection, or disinterest
+    - Shows unwillingness to proceed
+    - Contains negative expressions in any language
+    - Uses negative emoji or symbols
+
+    3. Classify as "unclear" when:
+    - The intention is ambiguous
+    - The text is a question
+    - The text is unrelated to yes/no
+    - The meaning is not certain
+
+    MULTILANGUAGE EXAMPLES:
+
+    YES responses:
+    - "Yes" / "Sí" / "Oui" / "Ja"
+    - "Of course" / "Por supuesto" / "Bien sûr"
+    - "I want to" / "Quiero" / "Je veux"
+    - "Sure" / "Claro" / "Certainement"
+    - "That works" / "Eso funciona" / "Ça marche"
+    - "I'm interested" / "Me interesa" / "Je suis intéressé"
+    - "👍" / "✅" / "♥"
+    - "ok" / "vale" / "bueno"
+
+    NO responses:
+    - "No" / "No" / "Non" / "Nein"
+    - "Not now" / "Ahora no" / "Pas maintenant"
+    - "I'll pass" / "Paso" / "Je passe"
+    - "Not interested" / "No me interesa" / "Pas intéressé"
+    - "Maybe later" / "Quizás después" / "Peut-être plus tard"
+    - "👎" / "❌" / "🚫"
+    - "nope" / "para nada" / "non merci"
+
+    Input: "Yes, please"
+    Output: yes
+
+    Input: "No gracias"
+    Output: no
+
+    Input: "How does this work?"
+    Output: unclear"""
+                },
+                {
+                    "role": "user",
+                    "content": text
+                }
+            ]
+
+            response = self.client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=messages,
+                temperature=0,
+                max_tokens=10
+            )
+
+            intention = response.choices[0].message.content.strip().lower()
+            
+            if intention == 'unclear':
+                return {
+                    "success": False,
+                    "error": "Unclear intention in the text",
+                    "intention": None
+                }
+
+            return {
+                "success": True,
+                "intention": intention
+            }
+
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e),
+                "intention": None
+            }
+
+
+
+
+
+
+
+    def extract_sector(self, text: str) -> str:     
+            
+
+            try:
+                messages = [
+                    {
+                        "role": "system",
+                        "content": """You are an AI specialized in identifying professional sectors.
+                        Return ONLY ONE WORD representing the sector from this list:
+                        - Business
+                        - Technology
+                        - Healthcare
+                        - Education
+                        - Creative
+                        - Legal
+                        - Finance
+                        - Marketing
+                        - Software
+                        - Medical
+                        
+                        Rules:
+                        - Return ONLY ONE WORD, no additional text
+                        - Convert related terms (e.g., 'salud' → 'Healthcare', 'tecnología' → 'Technology')
+                        - If no sector is identified, return 'Unknown'
+                        """
+                    },
+                    {
+                        "role": "user",
+                        "content": text
+                    }
+                ]
+
+                response = self.client.chat.completions.create(
+                    model="gpt-4",
+                    messages=messages,
+                    temperature=0.1,
+                    max_tokens=10
+                )
+
+                return response.choices[0].message.content.strip()
+
+            except Exception:
+                return "Unknown"
+            
+
+
+
+    def extract_region(self, location: str) -> Dict:
+            try:
+                logger.info(f"Identifying region for location: {location}")
+
+                messages = [
+                    {
+                        "role": "system",
+                        "content": "You are a geography expert. You must categorize locations into one of these regions: North America, Europe, or Asia. Only respond with one of these three options."
+                    },
+                    {
+                        "role": "user",
+                        "content": f"Which region (North America, Europe, or Asia) does {location} belong to? Only respond with the region name."
+                    }
+                ]
+
+                response = self.client.chat.completions.create(
+                    model="gpt-4",
+                    messages=messages,
+                    temperature=0.3
+                )
+
+                region = response.choices[0].message.content.strip()
+
+                if region not in ["North America", "Europe", "Asia"]:
+                    logger.warning(f"Invalid region response: {region}")
+                    return {
+                        "success": False,
+                        "error": f"Invalid region: {region}"
+                    }
+
+                logger.info(f"Location '{location}' identified as {region}")
+                return {
+                    "success": True,
+                    "region": region,
+                    "original_location": location
+                }
+
+            except Exception as e:
+                logger.error(f"Error identifying region: {str(e)}")
+                return {
+                    "success": False,
+                    "error": str(e)
+                }
+        
+
+
+
+
+
+    def process_company_response(self, text: str) -> str:
+        try:
+            messages = [
+                {
+                    "role": "system",
+                    "content": """You are an AI specialized in processing responses about company preferences.
+                    
+                    Your task is to:
+                    1. If the user mentions company names, extract and return them as a comma-separated list
+                    2. If the user expresses no interest or a negative response, return exactly "no"
+                    
+                    Rules:
+                    - For company names: Return ONLY the company names separated by commas, no additional text
+                    - For negative responses: Return ONLY "no"
+                    - Handle multilingual inputs
+                    - Remove any extra spaces or punctuation
+                    
+                    Examples:
+                    Input: "Me gustaría trabajar en Google y Microsoft"
+                    Output: Google, Microsoft
+                    
+                    Input: "I'm interested in Apple, Meta and Amazon"
+                    Output: Apple, Meta, Amazon
+                    
+                    Input: "No tengo preferencias de empresas"
+                    Output: no
+                    
+                    Input: "I don't have any specific companies in mind"
+                    Output: no
+                    
+                    Input: "Non, je n'ai pas d'entreprises spécifiques"
+                    Output: no
+                    
+                    Input: "Quiero experiencia en Tesla, SpaceX"
+                    Output: Tesla, SpaceX"""
+                },
+                {
+                    "role": "user",
+                    "content": text
+                }
+            ]
+
+            response = self.client.chat.completions.create(
+                model="gpt-4",
+                messages=messages,
+                temperature=0.1,
+                max_tokens=100
+            )
+
+            return response.choices[0].message.content.strip()
+
+        except Exception:
+            return "no"
+
+    def get_companies_suggestions(
+            self,
+            sector: str,
+            geography: str,
+            temperature: float = 0.7
+        ) -> Dict:
+            try:
+                logger.info(f"Generating companies for sector: {sector}, geography: {geography}")
+
+                messages = [
+                    {
+                        "role": "system",
+                        "content": """You are a professional business analyst that provides accurate lists of companies.
+                        When given a sector and location, provide real companies that operate in that specific location.
+                        If the location is not specific enough or invalid, indicate that in your response."""
+                    },
+                    {
+                        "role": "user",
+                        "content": f"List exactly 20 real companies in the {sector} sector that have significant operations or presence in {geography}. If {geography} is not a valid or specific location, please indicate that. Only provide the company names separated by commas, or indicate if the location is invalid."
+                    }
+                ]
+
+                response = self.client.chat.completions.create(
+                    model="gpt-4",
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=250
+                )
+
+                content = response.choices[0].message.content
+                if content is None or "invalid" in content.lower() or "didn't specify" in content.lower():
+                    logger.info("Invalid or unspecified location")
+                    error_message = f"Please provide a more specific location for {sector} companies."
+                    return {
+                        "success": False,
+                        "error": error_message,
+                        "content": [],
+                        "contentId": str(uuid.uuid4())
+                    }
+
+                companies_text = content.strip()
+                if not companies_text:
+                    logger.info("Received empty response from API")
+                    return {
+                        "success": True,
+                        "content": [],
+                        "contentId": str(uuid.uuid4())
+                    }
+
+                companies = [
+                    company.strip()
+                    for company in companies_text.split(',')
+                    if company.strip() and not company.strip().isspace()
+                ]
+
+                if len(companies) < 20:
+                    logger.warning(f"Received only {len(companies)} companies, requesting more")
+                    return self.get_companies_suggestions(sector, geography, temperature)
+
+                logger.info(f"Successfully generated {len(companies)} companies")
+
+                translated_messages = {
+                    "title": self.translate_message(
+                        f"Found {sector} companies in {geography}",
+                        self.current_language
+                    )
+                }
+
+                return {
+                    "success": True,
+                    "content": companies[:20],
+                    "contentId": str(uuid.uuid4()),
+                    "messages": translated_messages,
+                    "detected_language": self.current_language
+                }
+
+            except Exception as e:
+                logger.error(f"Error generating companies: {str(e)}")
+                return {
+                    "success": False,
+                    "error": "An error occurred while generating companies",
+                    "contentId": None,
+                    "detected_language": self.current_language
+                }
