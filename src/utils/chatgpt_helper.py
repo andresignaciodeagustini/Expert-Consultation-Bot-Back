@@ -864,6 +864,8 @@ class ChatGPTHelper:
 
 
 
+
+
     def extract_sector(self, text: str) -> str:     
             
 
@@ -955,12 +957,103 @@ class ChatGPTHelper:
                     "error": str(e)
                 }
         
+    def extract_work_timing(self, text: str) -> str:
+        try:
+            messages = [
+                {
+                    "role": "system",
+                    "content": """You are an analyzer that determines user preferences regarding experts' work timing at companies.
+                    Your task is to extract if the user wants experts who:
+                    - currently work at the companies
+                    - previously worked at the companies
+                    - both options
+
+                    IMPORTANT: Return ONLY ONE of these exact words: 'current', 'previous', or 'both'
+                    Do not use any other variations.
+
+                    Rules:
+                    - If user writes 'both' → return 'both'
+                    - If user writes 'previous' or 'previously' → return 'previous'
+                    - If user writes 'current' or 'currently' → return 'current'
+                    - For other expressions, interpret the meaning and return one of these three options
+                    - Handle multiple languages and informal expressions
+
+                    Examples:
+                    Return 'current':
+                    - "I want experts who currently work there"
+                    - "Current employees"
+                    - "People working there now"
+                    - "Quiero expertos que trabajen actualmente"
+                    - "Actuales empleados"
+                    
+                    Return 'previous':
+                    - "I prefer former employees"
+                    - "Those who worked there before"
+                    - "Past experience is fine"
+                    - "Ex empleados"
+                    - "Personas que hayan trabajado antes"
+                    
+                    Return 'both':
+                    - "Both options are good"
+                    - "Current and former employees"
+                    - "Either is fine"
+                    - "Ambas opciones"
+                    - "Los dos"
+                    - "No tengo preferencia"
+
+                    Direct matches:
+                    Input: "both" → Output: both
+                    Input: "previous" → Output: previous
+                    Input: "current" → Output: current
+                    Input: "previously" → Output: previous
+                    Input: "currently" → Output: current
+
+                    Other examples:
+                    Input: "I want current employees"
+                    Output: current
+
+                    Input: "Prefiero ex empleados"
+                    Output: previous
+
+                    Input: "Both options would work"
+                    Output: both"""
+                },
+                {
+                    "role": "user",
+                    "content": text
+                }
+            ]
+
+            response = self.client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=messages,
+                temperature=0,
+                max_tokens=10
+            )
+
+            # Primero verificar si el texto coincide exactamente con una de las opciones
+            cleaned_text = text.strip().lower()
+            if cleaned_text in ['both', 'previous', 'current']:
+                return cleaned_text
+            elif cleaned_text == 'previously':
+                return 'previous'
+            elif cleaned_text == 'currently':
+                return 'current'
+
+            timing = response.choices[0].message.content.strip().lower()
+            
+            # Validar que la respuesta sea una de las opciones permitidas
+            valid_responses = ['current', 'previous', 'both']
+            if timing not in valid_responses:
+                return None
+
+            return timing
+
+        except Exception as e:
+            return None
 
 
-
-
-
-    def process_company_response(self, text: str) -> str:
+    def process_company_response(self, text: str):
         try:
             messages = [
                 {
@@ -981,20 +1074,8 @@ class ChatGPTHelper:
                     Input: "Me gustaría trabajar en Google y Microsoft"
                     Output: Google, Microsoft
                     
-                    Input: "I'm interested in Apple, Meta and Amazon"
-                    Output: Apple, Meta, Amazon
-                    
                     Input: "No tengo preferencias de empresas"
-                    Output: no
-                    
-                    Input: "I don't have any specific companies in mind"
-                    Output: no
-                    
-                    Input: "Non, je n'ai pas d'entreprises spécifiques"
-                    Output: no
-                    
-                    Input: "Quiero experiencia en Tesla, SpaceX"
-                    Output: Tesla, SpaceX"""
+                    Output: no"""
                 },
                 {
                     "role": "user",
@@ -1009,10 +1090,27 @@ class ChatGPTHelper:
                 max_tokens=100
             )
 
-            return response.choices[0].message.content.strip()
+            result = response.choices[0].message.content.strip()
+            
+            # Si es una respuesta negativa, devolver "no"
+            if result.lower() == "no":
+                return "no"
+            
+            # Si son compañías, devolver un diccionario
+            companies = [company.strip() for company in result.split(',')]
+            return {
+                'interested_in_companies': True,
+                'companies': companies
+            }
 
         except Exception:
             return "no"
+
+
+
+
+
+
 
     def get_companies_suggestions(
             self,
@@ -1098,3 +1196,84 @@ class ChatGPTHelper:
                     "contentId": None,
                     "detected_language": self.current_language
                 }
+
+
+
+
+
+
+    def extract_expert_name(self, text: str) -> Dict:
+        try:
+            messages = [
+                {
+                    "role": "system",
+                    "content": """You are a name extractor and formatter. Your task is to identify and properly format personal names from input text.
+                    Rules:
+                    - Extract only the name and surname
+                    - Capitalize first letter of each name/surname
+                    - Return ONLY the formatted name, nothing else
+                    - If no clear name is found, return 'unclear'
+                    - Handle multiple languages
+                    - Remove any extra words or context
+
+                    Examples:
+                    Input: "me interesa john doe"
+                    Output: John Doe
+
+                    Input: "quiero trabajar con maría garcía"
+                    Output: María García
+
+                    Input: "I want to work with peter parker please"
+                    Output: Peter Parker
+
+                    Input: "je voudrais jean dupont"
+                    Output: Jean Dupont
+
+                    Input: "me gustaría trabajar con JUAN PEREZ"
+                    Output: Juan Perez
+
+                    Input: "hello how are you"
+                    Output: unclear
+
+                    Input: "robert downey jr me interesa"
+                    Output: Robert Downey Jr
+
+                    Input: "escojo a ANA MARÍA LÓPEZ"
+                    Output: Ana María López"""
+                },
+                {
+                    "role": "user",
+                    "content": text
+                }
+            ]
+
+            response = self.client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=messages,
+                temperature=0,
+                max_tokens=20
+            )
+
+            extracted_name = response.choices[0].message.content.strip()
+            
+            if extracted_name.lower() == 'unclear':
+                return {
+                    "success": False,
+                    "error": "No clear name found in the text",
+                    "name": None
+                }
+
+            return {
+                "success": True,
+                "name": extracted_name
+            }
+
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e),
+                "name": None
+            }
+
+
+
