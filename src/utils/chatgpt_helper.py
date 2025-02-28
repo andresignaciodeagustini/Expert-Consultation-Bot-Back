@@ -93,11 +93,12 @@ class ChatGPTHelper:
             return "en"
 
     def translate_message(self, message: str, target_language: str) -> str:
+    
         try:
             messages = [
                 {
                     "role": "system",
-                    "content": f"You are a translator. Translate the following text to {target_language}. Only respond with the translation, nothing else."
+                    "content": f"You are a translator. Translate the following text to {target_language}. Only provide the translation, nothing else."
                 },
                 {
                     "role": "user",
@@ -111,12 +112,174 @@ class ChatGPTHelper:
                 temperature=0.3
             )
 
-            translated_text = response.choices[0].message.content.strip()
-            return translated_text
+            return response.choices[0].message.content.strip()
 
         except Exception as e:
             logger.error(f"Translation error: {str(e)}")
-            return message
+            return message  # Retorna el mensaje original si hay error
+            
+
+
+    def process_text_input(self, text: str, previous_language: str = None) -> Dict:
+        try:
+            context_info = f"Previous detected language: {previous_language}" if previous_language else "No previous language context"
+            
+            messages = [
+                {
+                    "role": "system",
+                    "content": f"""You are a specialized language detector for multilingual content.
+                    CONTEXT INFORMATION: {context_info}
+
+                    Your tasks:
+                    1. Detect the language and return ONLY the precise ISO code (e.g., fr-FR, es-ES, it-IT, en-US, pt-BR)
+                    
+                    2. CONTEXT RULES:
+                    - For single word responses (especially "yes"/"no"), prioritize the previous language context
+                    - Only override previous language if the response is clearly from a different language
+                    - For ambiguous short responses, maintain the previous language context
+                    Example: if previous language is es-ES and user says "no", return es-ES
+                    
+                    3. PRIORITY RULES:
+                    - Always prioritize the sentence structure and context over proper names
+                    - Ignore proper names when they conflict with the main text language
+                    - Focus on grammatical structure and common words
+                    - When finding proper names, prioritize the surrounding text
+                    
+                    4. For short texts and names:
+                    - Ignore email addresses when detecting language
+                    - Focus on the actual text content
+                    - Consider common phrases and words
+                    - When finding proper names, prioritize the surrounding text
+
+                    5. YES/NO REFERENCE TABLE with CONTEXT:
+                    English (en-US): yes, yeah, yep, sure, certainly, no, nope, nah
+                    Spanish (es-ES): sí, si, claro, efectivamente, por supuesto, no, nop, para nada
+                    French (fr-FR): oui, ouais, bien sûr, certainement, non, pas du tout
+                    Italian (it-IT): sì, si, certo, certamente, esatto, no, non
+                    German (de-DE): ja, jawohl, doch, natürlich, selbstverständlich, nein, nö
+                    Portuguese (pt-BR/pt-PT): sim, claro, certamente, não, nao
+                    Japanese (ja-JP): はい (hai), うん (un), ええ (ee), そう (sou), いいえ (iie), いや (iya), ちがう (chigau)
+                    Chinese Simplified (zh-CN): 是的 (shì de), 好的 (hǎo de), 对 (duì), 不是 (bú shì), 不 (bù), 没有 (méi yǒu)
+                    Chinese Traditional (zh-TW): 是的, 好的, 對, 不是, 不, 沒有
+                    Russian (ru-RU): да (da), конечно (konechno), разумеется, нет (net), нету (netu)
+                    Arabic (ar-SA): نعم (na'am), أجل (ajal), طبعا (tab'an), لا (la), كلا (kalla)
+                    Korean (ko-KR): 네 (ne), 예 (ye), 그렇습니다 (geureoseumnida), 아니요 (aniyo), 아니 (ani)
+                    Dutch (nl-NL): ja, jawel, zeker, natuurlijk, nee, neen
+                    Swedish (sv-SE): ja, jovisst, absolut, visst, nej, inte
+                    Norwegian (no-NO): ja, jo, jepp, nei, neppe
+                    Danish (da-DK): ja, jo, jep, nej, næ
+                    Finnish (fi-FI): kyllä, joo, juu, ei, eikä
+                    Polish (pl-PL): tak, no tak, owszem, nie, nigdy
+                    Turkish (tr-TR): evet, tabii, elbette, hayır, yok
+                    Greek (el-GR): ναι (nai), μάλιστα (malista), όχι (ochi), μπα (ba)
+                    Hindi (hi-IN): हाँ (haan), जी हाँ (ji haan), नहीं (nahin), बिल्कुल नहीं (bilkul nahin)
+                    Vietnamese (vi-VN): có, vâng, đúng, không, không phải
+                    Thai (th-TH): ใช่ (chai), ครับ/ค่ะ (khrap/kha), ไม่ (mai), ไม่ใช่ (mai chai)
+                    Indonesian (id-ID): ya, iya, betul, tidak, nggak
+                    Hebrew (he-IL): כן (ken), בטח (betach), לא (lo), אין (ein)
+                    Czech (cs-CZ): ano, jo, ne, nikoliv
+                    Hungarian (hu-HU): igen, ja, nem, dehogy
+
+                    IMPORTANT: 
+                    - Return ONLY the language code
+                    - For short answers like "no", "si", "ok":
+                    * If there's previous language context, prioritize it
+                    * If no context, analyze surrounding words or default to most likely language
+                    
+                    Examples with context:
+                    - Previous: es-ES | Input: "no" → es-ES
+                    - Previous: it-IT | Input: "no" → it-IT
+                    - Previous: es-ES | Input: "yes" → en-US (clearly English, override context)
+                    - Previous: fr-FR | Input: "I want to contact María González" → en-US (full sentence overrides context)
+                    - Previous: es-ES | Input: "gracias" → es-ES
+                    - Previous: None | Input: "no" → analyze as new input
+                    - Previous: es-ES | Input: "oui" → fr-FR (clearly French, override context)
+                    - Previous: en-US | Input: "I want to contact María González" → en-US (prioritize "I want to contact" over the name)
+                    - Previous: fr-FR | Input: "Ceci est mon email test@test.com" → fr-FR
+                    - Previous: es-ES | Input: "Quiero contactar a María González" → es-ES
+                    - Previous: None | Input: "This is my email" → en-US
+                    - Previous: it-IT | Input: "Questo è il mio email" → it-IT
+                    - Previous: ja-JP | Input: "はい、お願いします" → ja-JP
+                    - Previous: None | Input: "Oui, bien sûr" → fr-FR
+                    - Previous: es-ES | Input: "No, gracias" → es-ES
+                    - Previous: en-US | Input: "Yes, please" → en-US
+                    - Previous: ko-KR | Input: "네, 감사합니다" → ko-KR
+                    - Previous: ru-RU | Input: "Да, спасибо" → ru-RU
+                    - Previous: ar-SA | Input: "نعم، شكراً" → ar-SA
+                    - Previous: he-IL | Input: "כן, תודה" → he-IL"""
+                },
+                {
+                    "role": "user",
+                    "content": text
+                }
+            ]
+
+            # Realizar detección de idioma
+            detect_response = self.client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=messages,
+                temperature=0.1
+            )
+            
+            detected_language = detect_response.choices[0].message.content.strip()
+            
+            return {
+                "success": True,
+                "text": text,
+                "detected_language": detected_language,
+                "is_email": '@' in text,
+                "previous_language": previous_language  # Incluir el contexto en la respuesta
+            }
+
+        except Exception as e:
+            logger.error(f"Error detecting language: {str(e)}")
+            return {
+                "success": False,
+                "detected_language": "en-US",
+                "error": str(e),
+                "previous_language": previous_language
+            }
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
     def translate_sector(self, sector_input:str) -> Dict:
         try:
@@ -494,124 +657,6 @@ class ChatGPTHelper:
 
 
 
-
-
-
-
-
-
-
-    def process_text_input(self, text: str) -> Dict:
-        try:
-            # Usar el endpoint de detección de idioma
-            detect_response = requests.post(
-                API_ENDPOINTS["detect_language"],
-                json={'text': text},
-                headers={'Content-Type': 'application/json'}
-            )
-            
-            if detect_response.status_code == 200:
-                detected_language = detect_response.json()['detected_language']
-                self.current_language = detected_language
-                
-                # Si el texto no está en inglés, traducirlo para procesamiento
-                if detected_language != 'en':
-                    translate_response = requests.post(
-                        API_ENDPOINTS["translate"],
-                        json={
-                            'text': text,
-                            'target_language': 'english'
-                        },
-                        headers={'Content-Type': 'application/json'}
-                    )
-                    
-                    if translate_response.status_code == 200:
-                        text_for_processing = translate_response.json()['translated_text']
-                    else:
-                        text_for_processing = text
-                else:
-                    text_for_processing = text
-
-                # Identificar la región usando el texto en inglés
-                region_result = self.identify_region(text_for_processing)
-                
-                if region_result['success']:
-                    # Preparar el mensaje base en inglés
-                    base_message = BOT_MESSAGES["region_prompt"].format(region_result['region'])
-                    # Traducir la respuesta al idioma detectado si es necesario
-                    if detected_language != 'en':
-                        translate_response = requests.post(
-                            API_ENDPOINTS["translate"],
-                            json={
-                                'text': base_message,
-                                'target_language': detected_language
-                            },
-                            headers={'Content-Type': 'application/json'}
-                        )
-                        
-                        if translate_response.status_code == 200:
-                            translated_message = translate_response.json()['translated_text']
-                        else:
-                            translated_message = base_message
-                    else:
-                        translated_message = base_message
-                    
-                    return {
-                        "success": True,
-                        "text": text,
-                        "detected_language": detected_language,
-                        "region": region_result['region'],
-                        "step": "region",
-                        "next_action": "request_sector",
-                        "message": translated_message,
-                        "language": detected_language
-                    }
-                else:
-                    error_message = self.get_bot_response('error_general')
-                    return {
-                        "success": False,
-                        "message": error_message,
-                        "detected_language": detected_language
-                    }
-            
-            else:
-                # Fallback al método original si el endpoint falla
-                return self._process_text_input_fallback(text)
-                        
-        except Exception as e:
-            logger.error(f"Error processing text input: {str(e)}")
-            return self._process_text_input_fallback(text)
-    def _process_text_input_fallback(self, text: str) -> Dict:
-        # Método de respaldo que usa la implementación original
-        detected_language = self.detected_language_from_content(text)
-        self.current_language = detected_language
-        
-        region_result = self.identify_region(text)
-        
-        if region_result['success']:
-            response_message = self.get_bot_response(
-                "region_prompt",
-                region_result['region']
-            )
-            
-            return {
-                "success": True,
-                "text": text,
-                "detected_language": detected_language,
-                "region": region_result['region'],
-                "step": "region",
-                "next_action": "request_sector",
-                "message": response_message,
-                "language": detected_language
-            }
-        else:
-            error_message = self.get_bot_response('error_general')
-            return {
-                "success": False,
-                "message": error_message,
-                "detected_language": detected_language
-            }
-        
 
 
 

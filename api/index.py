@@ -206,13 +206,12 @@ def is_email_registered(email: str) -> bool:
 def capture_email():
     try:
         data = request.json
-        if 'email' not in data or 'text' not in data:
+        if 'text' not in data:
             return jsonify({
                 'success': False,
-                'message': 'Email and text are required'
+                'message': 'Text is required'
             }), 400
         
-
         chatgpt = ChatGPTHelper()
         email_extraction_result = chatgpt.extract_email(data['text'])
         
@@ -272,6 +271,18 @@ def capture_email():
             'success': False,
             'error': error_message
         }), 500
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -362,25 +373,28 @@ def capture_name():
 
 
 
-
-    
 @app.route('/api/ai/expert-connection/ask', methods=['POST'])
 def ask_expert_connection():
     try:
         data = request.json
         
-        required_fields = ['text', 'name', 'detected_language']
+        required_fields = ['text', 'name']
         if not all(field in data for field in required_fields):
             return jsonify({
                 'success': False,
-                'message': 'Required fields missing: text, name, detected_language'
+                'message': 'Required fields missing: text, name'
             }), 400
 
         text = data['text']
         name = data['name']
-        detected_language = data['detected_language']
 
         chatgpt = ChatGPTHelper()
+        
+        # Primero procesamos el texto para detectar/confirmar el idioma
+        text_processing_result = chatgpt.process_text_input(text)
+        detected_language = text_processing_result.get('detected_language', 'en')
+
+        # Luego extraemos la intención
         intention_result = chatgpt.extract_intention(text)
 
         if not intention_result['success']:
@@ -388,9 +402,8 @@ def ask_expert_connection():
             return jsonify({
                 'success': False,
                 'error': translated_error,
-                'step': 'clarify'  # Indicate that clarification is needed
-            }), 400 # Bad request due to unclear input
-
+                'step': 'clarify'
+            }), 400
 
         intention = intention_result['intention']
 
@@ -422,25 +435,25 @@ def ask_expert_connection():
             base_message = "I'm not sure if that's a yes or no. Could you please clarify?"
             translated_message = chatgpt.translate_message(base_message, detected_language)
             return jsonify({
-                'success': True,  # Still success, but needs clarification
+                'success': True,
                 'message': translated_message,
                 'detected_language': detected_language,
                 'step': 'clarify'
             })
 
-
     except Exception as e:
         print(f"Error in expert connection answer: {str(e)}")
         error_message = "An error occurred while processing your request."
-        # Try to translate, but use default if language is unknown
-        translated_error = chatgpt.translate_message(error_message, detected_language) if 'detected_language' in locals() else error_message
+        translated_error = chatgpt.translate_message(
+            error_message, 
+            detected_language if 'detected_language' in locals() else 'en'
+        )
         return jsonify({
             'success': False,
             'error': translated_error
         }), 500
-#############################################################################################################3
-#############################################################################################################
-##SEGUNDA FASE###
+
+
 
 
 
@@ -457,16 +470,21 @@ def sector_experience():
             }), 400
 
         chatgpt = ChatGPTHelper()
-        detected_language = data.get('language', 'en')  # Default to 'en'
+        
+        # Detectar idioma del texto de entrada
+        text_processing_result = chatgpt.process_text_input(data['sector'])
+        detected_language = text_processing_result.get('detected_language', 'en')
         
         # Extract sector from user input
         raw_sector_text = data['sector']
         sector = chatgpt.extract_sector(raw_sector_text)
         
         if not sector:
+            error_message = 'Could not identify a valid sector from the provided text'
+            translated_error = chatgpt.translate_message(error_message, detected_language)
             return jsonify({
                 'success': False,
-                'message': 'Could not identify a valid sector from the provided text'
+                'message': translated_error
             }), 400
 
         # Base messages in English
@@ -497,7 +515,7 @@ def sector_experience():
             'message': response_message,
             'has_additional_info': 'additional_info' in data and bool(data['additional_info']),
             'sector': sector,
-            'language': detected_language
+            'detected_language': detected_language  # Cambiado de 'language' a 'detected_language'
         }
 
         if additional_messages:
@@ -513,11 +531,8 @@ def sector_experience():
             'success': False,
             'message': translated_error,
             'error': str(e),
-            'language': detected_language
+            'detected_language': detected_language
         }), 500
-
-
-
 
 
 @app.route('/api/ai/test/process-text', methods=['POST'])
@@ -532,7 +547,10 @@ def test_process_text():
             }), 400
 
         chatgpt = ChatGPTHelper()
-        detected_language = data.get('language', 'en')  # Default to 'en'
+        
+        # Detectar el idioma automáticamente usando process_text_input
+        text_processing_result = chatgpt.process_text_input(data['text'])
+        detected_language = text_processing_result.get('detected_language', 'en')
         
         # Extract region from user input
         raw_region_text = data['text']
@@ -556,26 +574,14 @@ def test_process_text():
             f"{BASE_MESSAGES['region_received'].format(region=region)} "
             f"{BASE_MESSAGES['ask_companies']}"
         )
-        next_question = chatgpt.translate_message(base_message, detected_language)  # Mantenemos next_question
-
-        # Prepare additional messages if needed
-        additional_messages = {}
-        if 'additional_info' in data:
-            confirmation_message = "Additional information has been registered successfully"
-            additional_messages['confirmation'] = chatgpt.translate_message(
-                confirmation_message,
-                detected_language
-            )
+        next_question = chatgpt.translate_message(base_message, detected_language)
 
         result = {
             'success': True,
             'processed_region': region,
             'next_question': next_question,
-            'language': detected_language
+            'detected_language': detected_language  # Cambiado de 'language' a 'detected_language'
         }
-
-        if additional_messages:
-            result['additional_messages'] = additional_messages
 
         return jsonify(result)
 
@@ -587,9 +593,13 @@ def test_process_text():
             'success': False,
             'message': translated_error,
             'error': str(e),
-            'language': detected_language
+            'detected_language': detected_language  # Cambiado aquí también
         }), 500
-    
+
+
+
+
+
 
 
 @app.route('/api/simple-expert-connection', methods=['POST'])
@@ -604,16 +614,21 @@ def simple_expert_connection():
             }), 400
 
         chatgpt = ChatGPTHelper()
-        detected_language = data.get('language', 'en')  # Default to 'en'
+        
+        # Detectar idioma automáticamente
+        text_processing_result = chatgpt.process_text_input(data['answer'])
+        detected_language = text_processing_result.get('detected_language', 'en')
         
         # Extract companies from user input
         answer = data['answer']
         companies_response = chatgpt.process_company_response(answer)
         
         if companies_response is None:
+            error_message = 'Could not process the company response properly'
+            translated_error = chatgpt.translate_message(error_message, detected_language)
             return jsonify({
                 'success': False,
-                'message': 'Could not process the company response properly'
+                'message': translated_error
             }), 400
 
         # Base messages in English
@@ -623,58 +638,36 @@ def simple_expert_connection():
             'processing_error': "Error processing your request"
         }
 
-        # Build the base message - AQUÍ ESTÁ LA MODIFICACIÓN PRINCIPAL
+        # Build and translate the response message
         if companies_response == "no":
-            response_message = BASE_MESSAGES['negative_response']
+            response_message = chatgpt.translate_message(BASE_MESSAGES['negative_response'], detected_language)
             interested_in_companies = False
             companies = []
-        elif isinstance(companies_response, dict):
-            response_message = BASE_MESSAGES['positive_response'].format(
-                companies=", ".join(companies_response['companies'])
-            )
-            interested_in_companies = companies_response['interested_in_companies']
-            companies = companies_response['companies']
         else:
-            return jsonify({
-                'success': False,
-                'message': 'Invalid response format'
-            }), 400
-            
-        message = chatgpt.translate_message(response_message, detected_language)
-
-        # Prepare additional messages if needed
-        additional_messages = {}
-        if 'additional_info' in data:
-            confirmation_message = "Additional information has been registered successfully"
-            additional_messages['confirmation'] = chatgpt.translate_message(
-                confirmation_message,
+            response_message = chatgpt.translate_message(
+                BASE_MESSAGES['positive_response'].format(companies=", ".join(companies_response['companies'])),
                 detected_language
             )
+            interested_in_companies = True
+            companies = companies_response['companies']
 
-        response = {
+        return jsonify({
             'success': True,
-            'message': message,
+            'message': response_message,
             'interested_in_companies': interested_in_companies,
             'companies': companies,
-            'language': detected_language
-        }
-
-        if additional_messages:
-            response['additional_messages'] = additional_messages
-
-        return jsonify(response)
+            'detected_language': detected_language
+        })
 
     except Exception as e:
-        print(f"Error in simple expert connection: {str(e)}")
-        error_message = BASE_MESSAGES['processing_error']
-        translated_error = chatgpt.translate_message(error_message, detected_language)
+        print(f"Error: {str(e)}")
+        error_message = chatgpt.translate_message(BASE_MESSAGES['processing_error'], detected_language)
         return jsonify({
             'success': False,
-            'message': translated_error,
+            'message': error_message,
             'error': str(e),
-            'language': detected_language
+            'detected_language': detected_language
         }), 500
-
 
 
 
@@ -687,12 +680,14 @@ def company_suggestions_test():
         # Validación de campos requeridos
         required_fields = ['sector', 'processed_region']
         if not all(field in data for field in required_fields):
+            error_message = 'Sector and region are required'
+            # Traducir mensaje de error de validación
+            translated_error = chatgpt.translate_message(error_message, data.get('language', 'en'))
             return jsonify({
                 'success': False,
-                'message': 'Sector and region are required'
+                'message': translated_error
             }), 400
 
-        # Inicialización de variables y configuración
         chatgpt = ChatGPTHelper()
         sector = data['sector']
         location = data['processed_region']
@@ -700,11 +695,15 @@ def company_suggestions_test():
         interested_in_companies = data.get('interested_in_companies', False)
         companies_list = data.get('companies', [])
 
-        # Definición de compañías ficticias para el sector tecnológico
+        # Traducir nombres de sectores para la comparación
+        tech_sectors = ['technology', 'tecnología', 'tech', 'tecnologia']
+        sector_translated = chatgpt.translate_message(sector, 'en').lower()  # Traducir al inglés para comparar
+
+        # Definición de compañías ficticias - Considerar traducir sus nombres
         TECH_FICTIONAL_COMPANIES = [
-            "Company 1 Tech Solutions",
-            "Company 2 Digital Systems",
-            "Company 3 Innovation Labs"
+            chatgpt.translate_message("Company 1 Tech Solutions", detected_language),
+            chatgpt.translate_message("Company 2 Digital Systems", detected_language),
+            chatgpt.translate_message("Company 3 Innovation Labs", detected_language)
         ]
 
         # Obtener sugerencias de ChatGPT
@@ -714,7 +713,7 @@ def company_suggestions_test():
         )
 
         # Procesamiento de compañías según el sector
-        if sector.lower() in ['technology', 'tecnología', 'tech', 'tecnologia']:
+        if sector_translated in tech_sectors:
             all_companies = TECH_FICTIONAL_COMPANIES + chatgpt_result['content']
         else:
             all_companies = chatgpt_result['content']
@@ -732,17 +731,28 @@ def company_suggestions_test():
         # Preparación del mensaje de respuesta
         if interested_in_companies and companies_list:
             companies_str = ", ".join(companies_list)
-            base_message = f"We have registered your interest in the following companies: {companies_str}."
+            base_message = chatgpt.translate_message(
+                f"We have registered your interest in the following companies: {companies_str}.",
+                detected_language
+            )
         else:
-            base_message = f"Suggested companies for the {sector} sector in {location}."
+            # Traducir la estructura completa del mensaje
+            message_template = "Suggested companies for the {sector} sector in {location}."
+            base_message = chatgpt.translate_message(
+                message_template.format(
+                    sector=sector,
+                    location=location
+                ),
+                detected_language
+            )
 
-        message = chatgpt.translate_message(base_message, detected_language)
+        # Traducir pregunta de confirmación
+        confirmation_question = chatgpt.translate_message(
+            "\n\nDo you agree with this list?",
+            detected_language
+        )
 
-        # Agregar pregunta de confirmación
-        confirmation_question = "\n\nDo you agree with this list?"
-        confirmation_question = chatgpt.translate_message(confirmation_question, detected_language)
-
-        final_message = message + confirmation_question
+        final_message = base_message + confirmation_question
 
         return jsonify({
             'success': True,
@@ -754,8 +764,10 @@ def company_suggestions_test():
 
     except Exception as e:
         print(f"Error in company suggestions: {str(e)}")
-        error_message = "An error occurred while processing your request."
-        error_message = chatgpt.translate_message(error_message, detected_language)
+        error_message = chatgpt.translate_message(
+            "An error occurred while processing your request.",
+            detected_language if 'detected_language' in locals() else 'en'
+        )
         return jsonify({
             'success': False,
             'message': error_message,
@@ -763,8 +775,6 @@ def company_suggestions_test():
             'interested_in_companies': False,
             'language': detected_language if 'detected_language' in locals() else 'en'
         }), 500
-    
-
 
 
 @app.route('/api/process-companies-agreement', methods=['POST'])
@@ -778,16 +788,21 @@ def process_companies_agreement():
             }), 400
 
         chatgpt = ChatGPTHelper()
-        detected_language = data.get('language', 'en')
+        
+        # Usar process_text_input para detectar el idioma del texto de entrada
+        text_processing_result = chatgpt.process_text_input(data['text'])
+        detected_language = text_processing_result.get('detected_language', 'en')
         
         # Extract agreement using existing extract_intention
         text = data['text']
         intention = chatgpt.extract_intention(text)
         
         if intention is None:
+            error_message = 'Could not determine if you agree with the list. Please answer yes or no.'
+            translated_error = chatgpt.translate_message(error_message, detected_language)
             return jsonify({
                 'success': False,
-                'message': 'Could not determine if you agree with the list. Please answer yes or no.'
+                'message': translated_error
             }), 400
 
         # Base messages in English
@@ -800,7 +815,7 @@ def process_companies_agreement():
         # Verificar la intención correctamente
         is_positive = intention.get('intention', '').lower() == 'yes'
         
-        # Select appropriate message based on intention
+        # Select appropriate message based on intention and traducir
         response_message = BASE_MESSAGES['positive_response'] if is_positive else BASE_MESSAGES['negative_response']
         translated_message = chatgpt.translate_message(response_message, detected_language)
 
@@ -808,7 +823,7 @@ def process_companies_agreement():
             'success': True,
             'message': translated_message,
             'agreed': intention,
-            'language': detected_language
+            'detected_language': detected_language  # Cambiado de 'language' a 'detected_language'
         })
 
     except Exception as e:
@@ -819,21 +834,25 @@ def process_companies_agreement():
             'success': False,
             'message': translated_error,
             'error': str(e),
-            'language': detected_language
+            'detected_language': detected_language  # Cambiado aquí también
         }), 500
     """"""""""""""""""""""""""""""""""""""""2"""
 ######################################################################################################
 ####################################### FASE3##########################################################
 
 
-
-
 @app.route('/api/specify-employment-status', methods=['POST'])
 def specify_employment_status():
     try:
         data = request.json
-        detected_language = data.get('language', 'en')
         chatgpt = ChatGPTHelper()
+
+        # Detectar idioma usando process_text_input si hay status
+        if 'status' in data:
+            text_processing_result = chatgpt.process_text_input(data['status'])
+            detected_language = text_processing_result.get('detected_language', 'en')
+        else:
+            detected_language = data.get('language', 'en')  # Mantener el idioma heredado si no hay texto nuevo
 
         BASE_MESSAGES = {
             'ask_preference': "Would you prefer experts who currently work at these companies, who worked there previously, or both options?",
@@ -848,8 +867,6 @@ def specify_employment_status():
         }
 
         def get_message(message):
-            if detected_language == 'en':
-                return message
             return chatgpt.translate_message(message, detected_language)
 
         def normalize_status(status_text):
@@ -873,7 +890,7 @@ def specify_employment_status():
                 'success': True,
                 'message': get_message(BASE_MESSAGES['ask_preference']),
                 'has_status': False,
-                'language': detected_language
+                'detected_language': detected_language  # Cambiado de 'language' a 'detected_language'
             })
 
         # Intentar primero con extract_work_timing
@@ -881,12 +898,11 @@ def specify_employment_status():
         
         # Si no funciona, seguir con la normalización normal
         if not status:
-            # Normalizar el status recibido
             user_status = data['status'].strip().lower()
             status = normalize_status(user_status)
 
-            # Si no se pudo normalizar y no es inglés, intentar con ChatGPT
-            if status is None and detected_language != 'en':
+            # Si no se pudo normalizar, intentar con ChatGPT
+            if status is None:
                 normalize_prompt = BASE_MESSAGES['normalize_prompt'] + data['status']
                 normalized_status = chatgpt.translate_message(normalize_prompt, 'en').strip().lower()
                 status = normalize_status(normalized_status)
@@ -900,7 +916,7 @@ def specify_employment_status():
                 'message': response_message,
                 'has_status': True,
                 'employment_status': status,
-                'language': detected_language
+                'detected_language': detected_language
             })
         else:
             error_message = get_message(BASE_MESSAGES['invalid_option'])
@@ -908,7 +924,7 @@ def specify_employment_status():
                 'success': False,
                 'message': error_message,
                 'has_status': False,
-                'language': detected_language
+                'detected_language': detected_language
             }), 400
 
     except Exception as e:
@@ -918,16 +934,26 @@ def specify_employment_status():
             'success': False,
             'message': error_message,
             'error': str(e),
-            'language': detected_language
+            'detected_language': detected_language
         }), 500
+
+
+
+
 
 
 @app.route('/api/exclude-companies', methods=['POST'])
 def exclude_companies():
     try:
         data = request.json
-        detected_language = data.get('language', 'en')
         chatgpt = ChatGPTHelper()
+
+        # Detectar idioma usando process_text_input si hay respuesta
+        if 'answer' in data:
+            text_processing_result = chatgpt.process_text_input(data['answer'])
+            detected_language = text_processing_result.get('detected_language', 'en')
+        else:
+            detected_language = data.get('language', 'en')  # Mantener idioma heredado si no hay texto nuevo
 
         # Mensajes base en inglés
         BASE_MESSAGES = {
@@ -937,10 +963,8 @@ def exclude_companies():
             'processing_error': "An error occurred while processing your request."
         }
 
-        # Función para obtener el mensaje según el idioma
+        # Función para traducir mensajes
         def get_message(message):
-            if detected_language == 'en':
-                return message
             return chatgpt.translate_message(message, detected_language)
 
         # Si no hay answer, devolver la pregunta inicial
@@ -973,7 +997,7 @@ def exclude_companies():
             excluded_companies = None
             has_excluded_companies = False
 
-        # Obtener mensaje según el idioma
+        # Traducir mensaje de respuesta
         response_message = get_message(base_message)
 
         return jsonify({
@@ -990,8 +1014,17 @@ def exclude_companies():
         return jsonify({
             'success': False,
             'message': error_message,
-            'error': str(e)
+            'error': str(e),
+            'detected_language': detected_language
         }), 500
+
+
+
+
+
+
+
+
 
 
 
@@ -1007,7 +1040,10 @@ def client_perspective():
             }), 400
 
         chatgpt = ChatGPTHelper()
-        detected_language = data.get('language', 'en')
+        
+        # Usar process_text_input para detectar el idioma del texto de entrada
+        text_processing_result = chatgpt.process_text_input(data['answer'])
+        detected_language = text_processing_result.get('detected_language', 'en')
 
         # Procesar la respuesta con ChatGPT primero
         intention_result = chatgpt.extract_intention(data['answer'])
@@ -1018,7 +1054,8 @@ def client_perspective():
             'ask_preference': "Would you be interested in receiving industry perspectives from the client side?",
             'confirmed_yes': "Great! I will include experts with client-side perspective in the search.",
             'confirmed_no': "Understood. I will focus on other perspectives in the search.",
-            'processing_error': "An error occurred while processing your request."
+            'processing_error': "An error occurred while processing your request.",
+            'invalid_response': "Could not determine your preference. Please answer yes or no."
         }
 
         # Procesar la respuesta basada en la intención extraída
@@ -1029,10 +1066,15 @@ def client_perspective():
             base_message = BASE_MESSAGES['confirmed_no']
             client_perspective = False
         else:
-            base_message = BASE_MESSAGES['ask_preference']
-            client_perspective = None
+            # Traducir mensaje de error de validación
+            error_message = chatgpt.translate_message(BASE_MESSAGES['invalid_response'], detected_language)
+            return jsonify({
+                'success': False,
+                'message': error_message,
+                'detected_language': detected_language
+            }), 400
 
-        # Traducir mensaje
+        # Traducir mensaje de respuesta
         response_message = chatgpt.translate_message(base_message, detected_language)
 
         return jsonify({
@@ -1040,7 +1082,7 @@ def client_perspective():
             'message': response_message,
             'detected_language': detected_language,
             'client_perspective': client_perspective,
-            'answer_received': intention if client_perspective is not None else None
+            'answer_received': intention
         })
 
     except Exception as e:
@@ -1052,11 +1094,35 @@ def client_perspective():
         return jsonify({
             'success': False,
             'message': error_message,
-            'error': str(e)
+            'error': str(e),
+            'detected_language': detected_language if 'detected_language' in locals() else 'en'
         }), 500
 
 
     ############################################
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1073,7 +1139,10 @@ def supply_chain_experience():
             }), 400
 
         chatgpt = ChatGPTHelper()
-        detected_language = data.get('language', 'en')
+        
+        # Usar process_text_input para detectar el idioma del texto de entrada
+        text_processing_result = chatgpt.process_text_input(data['answer'])
+        detected_language = text_processing_result.get('detected_language', 'en')
 
         # Procesar la respuesta con ChatGPT primero
         intention_result = chatgpt.extract_intention(data['answer'])
@@ -1084,7 +1153,8 @@ def supply_chain_experience():
             'ask_preference': "Would you like to include experts with supply chain experience?",
             'confirmed_yes': "Perfect! I will include experts with supply chain experience in the search.",
             'confirmed_no': "Understood. I will not prioritize supply chain experience in the search.",
-            'processing_error': "An error occurred while processing your request."
+            'processing_error': "An error occurred while processing your request.",
+            'invalid_response': "Could not determine your preference. Please answer yes or no."
         }
 
         # Procesar la respuesta basada en la intención extraída
@@ -1095,10 +1165,15 @@ def supply_chain_experience():
             base_message = BASE_MESSAGES['confirmed_no']
             supply_chain_required = False
         else:
-            base_message = BASE_MESSAGES['ask_preference']
-            supply_chain_required = None
+            # Traducir mensaje de error de validación
+            error_message = chatgpt.translate_message(BASE_MESSAGES['invalid_response'], detected_language)
+            return jsonify({
+                'success': False,
+                'message': error_message,
+                'detected_language': detected_language
+            }), 400
 
-        # Traducir mensaje
+        # Traducir mensaje de respuesta
         response_message = chatgpt.translate_message(base_message, detected_language)
 
         return jsonify({
@@ -1106,7 +1181,7 @@ def supply_chain_experience():
             'message': response_message,
             'detected_language': detected_language,
             'supply_chain_required': supply_chain_required,
-            'answer_received': intention if supply_chain_required is not None else None
+            'answer_received': intention
         })
 
     except Exception as e:
@@ -1118,15 +1193,26 @@ def supply_chain_experience():
         return jsonify({
             'success': False,
             'message': error_message,
-            'error': str(e)
+            'error': str(e),
+            'detected_language': detected_language if 'detected_language' in locals() else 'en'
         }), 500
 
 
 
 
 
-
     ###############################################################3
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1142,7 +1228,10 @@ def evaluation_questions():
             }), 400
 
         chatgpt = ChatGPTHelper()
-        detected_language = data.get('language', 'en')
+        
+        # Usar process_text_input para detectar el idioma del texto de entrada
+        text_processing_result = chatgpt.process_text_input(data['answer'])
+        detected_language = text_processing_result.get('detected_language', 'en')
 
         # Procesar la respuesta con ChatGPT primero
         intention_result = chatgpt.extract_intention(data['answer'])
@@ -1153,7 +1242,8 @@ def evaluation_questions():
             'ask_preference': "Would you like to add evaluation questions for the project?",
             'confirmed_yes': "Excellent! Please provide your evaluation questions for the project.",
             'confirmed_no': "Understood. We will proceed without evaluation questions.",
-            'processing_error': "An error occurred while processing your request."
+            'processing_error': "An error occurred while processing your request.",
+            'invalid_response': "Could not determine your preference. Please answer yes or no."
         }
 
         # Procesar la respuesta basada en la intención extraída
@@ -1164,10 +1254,15 @@ def evaluation_questions():
             base_message = BASE_MESSAGES['confirmed_no']
             evaluation_required = False
         else:
-            base_message = BASE_MESSAGES['ask_preference']
-            evaluation_required = None
+            # Traducir mensaje de error de validación
+            error_message = chatgpt.translate_message(BASE_MESSAGES['invalid_response'], detected_language)
+            return jsonify({
+                'success': False,
+                'message': error_message,
+                'detected_language': detected_language
+            }), 400
 
-        # Traducir mensaje
+        # Traducir mensaje de respuesta
         response_message = chatgpt.translate_message(base_message, detected_language)
 
         return jsonify({
@@ -1175,7 +1270,7 @@ def evaluation_questions():
             'message': response_message,
             'detected_language': detected_language,
             'evaluation_required': evaluation_required,
-            'answer_received': intention if evaluation_required is not None else None
+            'answer_received': intention
         })
 
     except Exception as e:
@@ -1187,9 +1282,19 @@ def evaluation_questions():
         return jsonify({
             'success': False,
             'message': error_message,
-            'error': str(e)
+            'error': str(e),
+            'detected_language': detected_language if 'detected_language' in locals() else 'en'
         }), 500
-    
+
+
+
+
+
+
+
+
+
+
 
 ##################################################
 @app.route('/api/evaluation-questions-sections', methods=['POST'])
@@ -1214,7 +1319,7 @@ def evaluation_questions_sections():
         }
 
         # Solo procesar las secciones que el cliente envía
-        sections = data['sections']  # Puede ser ["proveedores"] o ["empresas", "clientes"], etc.
+        sections = data['sections']
         questions = data.get('questions', {})
 
         # Encontrar secciones que faltan
@@ -1222,7 +1327,9 @@ def evaluation_questions_sections():
 
         if missing_sections:
             current_section = missing_sections[0]
-            base_message = BASE_MESSAGES['request_questions'].format(section=current_section)
+            # Traducir el nombre de la sección también
+            translated_section = chatgpt.translate_message(current_section, detected_language)
+            base_message = BASE_MESSAGES['request_questions'].format(section=translated_section)
             response_message = chatgpt.translate_message(base_message, detected_language)
 
             return jsonify({
@@ -1230,6 +1337,7 @@ def evaluation_questions_sections():
                 'status': 'pending',
                 'message': response_message,
                 'current_section': current_section,
+                'current_section_translated': translated_section,
                 'remaining_sections': missing_sections[1:],
                 'completed_sections': list(questions.keys()),
                 'detected_language': detected_language
@@ -1238,11 +1346,17 @@ def evaluation_questions_sections():
             base_message = BASE_MESSAGES['all_completed']
             response_message = chatgpt.translate_message(base_message, detected_language)
 
+            # Traducir las secciones completadas
+            translated_questions = {}
+            for section, questions_list in questions.items():
+                translated_section = chatgpt.translate_message(section, detected_language)
+                translated_questions[translated_section] = questions_list
+
             return jsonify({
                 'success': True,
                 'status': 'completed',
                 'message': response_message,
-                'sections_with_questions': questions,
+                'sections_with_questions': translated_questions,
                 'detected_language': detected_language
             })
 
@@ -1257,7 +1371,6 @@ def evaluation_questions_sections():
             'message': error_message,
             'error': str(e)
         }), 500
-
 
 
 
@@ -1468,8 +1581,6 @@ def industry_experts():
         }), 500
 
 
-
-
 @app.route('/api/select-experts', methods=['POST'])
 def select_experts():
     try:
@@ -1477,9 +1588,15 @@ def select_experts():
         selected_experts = data.get('selected_experts')
         all_experts_data = data.get('all_experts_data')
         evaluation_questions = data.get('evaluation_questions', {})
-        detected_language = data.get('all_experts_data', {}).get('detected_language', 'en')
         
         chatgpt = ChatGPTHelper()
+
+        # Detectar idioma del nombre del experto si existe
+        if selected_experts and len(selected_experts) > 0:
+            text_processing_result = chatgpt.process_text_input(selected_experts[0])
+            detected_language = text_processing_result.get('detected_language', 'en')
+        else:
+            detected_language = data.get('all_experts_data', {}).get('detected_language', 'en')
 
         # Procesar el nombre del experto con ChatGPT primero
         if selected_experts and len(selected_experts) > 0:
