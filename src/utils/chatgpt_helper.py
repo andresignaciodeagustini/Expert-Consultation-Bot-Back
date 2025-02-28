@@ -128,25 +128,63 @@ class ChatGPTHelper:
                     "content": """You are a specialized language detector for multilingual content.
                     Your tasks:
                     1. Detect the language and return ONLY the precise ISO code (e.g., fr-FR, es-ES, it-IT, en-US, pt-BR)
-                    2. If you cannot determine the language with certainty, return 'en-US'
-                    3. PRIORITY RULES:
+                    2. PRIORITY RULES:
                     - Always prioritize the sentence structure and context over proper names
                     - Ignore proper names when they conflict with the main text language
                     - Focus on grammatical structure and common words
-                    - If text is ambiguous or unclear, return 'en-US'
                     
-                    [... resto del contenido igual ...]
+                    3. For short texts and names:
+                    - Ignore email addresses when detecting language
+                    - Focus on the actual text content
+                    - Consider common phrases and words
+                    - When finding proper names, prioritize the surrounding text
 
-                    IMPORTANT: 
-                    - Return ONLY the language code, nothing else
-                    - If language cannot be determined with confidence, return 'en-US'
-                    - If text is too short or ambiguous, return 'en-US'
+                    4. YES/NO REFERENCE TABLE (use for language detection):
+                    English (en-US): yes, yeah, yep, sure, certainly, no, nope, nah
+                    Spanish (es-ES): sí, si, claro, efectivamente, por supuesto, no, nop, para nada
+                    French (fr-FR): oui, ouais, bien sûr, certainement, non, pas du tout
+                    Italian (it-IT): sì, si, certo, certamente, esatto, no, non
+                    German (de-DE): ja, jawohl, doch, natürlich, selbstverständlich, nein, nö
+                    Portuguese (pt-BR/pt-PT): sim, claro, certamente, não, nao
+                    Japanese (ja-JP): はい (hai), うん (un), ええ (ee), そう (sou), いいえ (iie), いや (iya), ちがう (chigau)
+                    Chinese Simplified (zh-CN): 是的 (shì de), 好的 (hǎo de), 对 (duì), 不是 (bú shì), 不 (bù), 没有 (méi yǒu)
+                    Chinese Traditional (zh-TW): 是的, 好的, 對, 不是, 不, 沒有
+                    Russian (ru-RU): да (da), конечно (konechno), разумеется, нет (net), нету (netu)
+                    Arabic (ar-SA): نعم (na'am), أجل (ajal), طبعا (tab'an), لا (la), كلا (kalla)
+                    Korean (ko-KR): 네 (ne), 예 (ye), 그렇습니다 (geureoseumnida), 아니요 (aniyo), 아니 (ani)
+                    Dutch (nl-NL): ja, jawel, zeker, natuurlijk, nee, neen
+                    Swedish (sv-SE): ja, jovisst, absolut, visst, nej, inte
+                    Norwegian (no-NO): ja, jo, jepp, nei, neppe
+                    Danish (da-DK): ja, jo, jep, nej, næ
+                    Finnish (fi-FI): kyllä, joo, juu, ei, eikä
+                    Polish (pl-PL): tak, no tak, owszem, nie, nigdy
+                    Turkish (tr-TR): evet, tabii, elbette, hayır, yok
+                    Greek (el-GR): ναι (nai), μάλιστα (malista), όχι (ochi), μπα (ba)
+                    Hindi (hi-IN): हाँ (haan), जी हाँ (ji haan), नहीं (nahin), बिल्कुल नहीं (bilkul nahin)
+                    Vietnamese (vi-VN): có, vâng, đúng, không, không phải
+                    Thai (th-TH): ใช่ (chai), ครับ/ค่ะ (khrap/kha), ไม่ (mai), ไม่ใช่ (mai chai)
+                    Indonesian (id-ID): ya, iya, betul, tidak, nggak
+                    Hebrew (he-IL): כן (ken), בטח (betach), לא (lo), אין (ein)
+                    Czech (cs-CZ): ano, jo, ne, nikoliv
+                    Hungarian (hu-HU): igen, ja, nem, dehogy
+                    
+                    IMPORTANT: Return ONLY the language code, nothing else.
                     
                     Examples:
-                    [... mismos ejemplos ...]
-                    - "123456" → en-US (cannot determine language)
-                    - "..." → en-US (cannot determine language)
-                    - "xyz" → en-US (cannot determine language)"""
+                    - "I want to contact María González" → en-US (prioritize "I want to contact" over the name)
+                    - "Ceci est mon email test@test.com" → fr-FR
+                    - "Quiero contactar a María González" → es-ES
+                    - "Je voudrais contacter María González" → fr-FR
+                    - "This is my email" → en-US
+                    - "Questo è il mio email" → it-IT
+                    - "はい、お願いします" → ja-JP
+                    - "Oui, bien sûr" → fr-FR
+                    - "No, gracias" → es-ES
+                    - "Yes, please" → en-US
+                    - "네, 감사합니다" → ko-KR
+                    - "Да, спасибо" → ru-RU
+                    - "نعم، شكراً" → ar-SA
+                    - "כן, תודה" → he-IL"""
                 },
                 {
                     "role": "user",
@@ -163,10 +201,6 @@ class ChatGPTHelper:
             
             detected_language = detect_response.choices[0].message.content.strip()
             
-            # Si la respuesta está vacía o no es un código de idioma válido, usar en-US
-            if not detected_language or len(detected_language) < 5:
-                detected_language = "en-US"
-            
             return {
                 "success": True,
                 "text": text,
@@ -181,8 +215,6 @@ class ChatGPTHelper:
                 "detected_language": "en-US",
                 "error": str(e)
             }
-
-
 
     
 
