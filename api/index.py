@@ -24,6 +24,8 @@ from src.services.external.zoho_services import ZohoService
 from src.utils.config import VALID_SECTORS
 from src.routes.ai.voiceRoutes import voice_routes
 
+
+LAST_DETECTED_LANGUAGE = None
 # Configuración inicial
 print("\n=== Environment Setup ===")
 current_dir = Path(__file__).parent.absolute()
@@ -201,21 +203,30 @@ def is_email_registered(email: str) -> bool:
     """
     return email.lower() in [e.lower() for e in REGISTERED_TEST_EMAILS]
 
-
 @app.route('/api/ai/email/capture', methods=['POST'])
 def capture_email():
     try:
+        global LAST_DETECTED_LANGUAGE
+        print("\n=== Language Detection Debug ===")
+        print(f"Previous detected language: {LAST_DETECTED_LANGUAGE}")
+        
         data = request.json
         if 'text' not in data:
+            print("Error: Missing 'text' in request")
             return jsonify({
                 'success': False,
                 'message': 'Text is required'
             }), 400
         
+        print(f"Received text: {data['text']}")
+        
         chatgpt = ChatGPTHelper()
+        print("\n=== Email Extraction ===")
         email_extraction_result = chatgpt.extract_email(data['text'])
+        print(f"Email extraction result: {email_extraction_result}")
         
         if not email_extraction_result['success']:
+            print("Error: No valid email found")
             return jsonify({
                 'success': False,
                 'message': 'No valid email found in text'
@@ -223,18 +234,30 @@ def capture_email():
 
         email = email_extraction_result['email']
         input_text = data['text']
+        print(f"Extracted email: {email}")
         
         # Inicializar ChatGPTHelper
+        print("\n=== Language Processing ===")
         chatgpt = ChatGPTHelper()
-        text_processing_result = chatgpt.process_text_input(input_text)
+        text_processing_result = chatgpt.process_text_input(input_text, LAST_DETECTED_LANGUAGE)
         detected_language = text_processing_result.get('detected_language', 'en')
+        print(f"Text processing result: {text_processing_result}")
+        print(f"Detected language: {detected_language}")
+        
+        # Actualizar idioma global
+        LAST_DETECTED_LANGUAGE = detected_language
+        print(f"Updated LAST_DETECTED_LANGUAGE to: {LAST_DETECTED_LANGUAGE}")
 
         # Verificar si el email está registrado
+        print("\n=== Registration Check ===")
         is_registered = is_email_registered(email)
+        print(f"Is email registered? {is_registered}")
 
-        # Siempre solicitar el nombre, independientemente del estado de registro
+        # Traducción de mensajes
+        print("\n=== Message Translation ===")
         base_message = "Thank you for your email. What is your name?"
         translated_message = chatgpt.translate_message(base_message, detected_language)
+        print(f"Translated main message: {translated_message}")
 
         response = {
             'success': True,
@@ -248,8 +271,10 @@ def capture_email():
 
         # Solo agregar información de booking si no está registrado
         if not is_registered:
+            print("\n=== Booking Information ===")
             booking_base_message = "Please book a call to complete your registration"
             booking_message = chatgpt.translate_message(booking_base_message, detected_language)
+            print(f"Translated booking message: {booking_message}")
             
             response.update({
                 'action_required': "book_call",
@@ -257,9 +282,12 @@ def capture_email():
                 'booking_message': booking_message
             })
 
+        print("\n=== Final Response ===")
+        print(f"Sending response: {response}")
         return jsonify(response)
 
     except Exception as e:
+        print(f"\n=== Error Handling ===")
         print(f"Error in email capture: {str(e)}")
         error_message = "An error occurred while processing your request."
         if 'chatgpt' in locals():
@@ -267,6 +295,7 @@ def capture_email():
                 error_message, 
                 detected_language if 'detected_language' in locals() else 'en'
             )
+        print(f"Translated error message: {error_message}")
         return jsonify({
             'success': False,
             'error': error_message
@@ -279,32 +308,46 @@ def capture_email():
 
 
 
-
-
-
-
-
-
-
-
-
-
-
 @app.route('/api/ai/name/capture', methods=['POST'])
 def capture_name():
     try:
+        global LAST_DETECTED_LANGUAGE
+        print("\n=== Language Detection Debug ===")
+        print(f"Previous detected language (global): {LAST_DETECTED_LANGUAGE}")
+        
         data = request.json
+        print(f"Received data: {data}")
+        
         if 'text' not in data or 'is_registered' not in data:
+            print("Error: Missing required fields")
             return jsonify({
                 'success': False,
                 'message': 'Text and registration status are required'
             }), 400
 
-        # AQUÍ implementar extract_name
         chatgpt = ChatGPTHelper()
+        
+        # Obtener el idioma anterior del request
+        previous_language = data.get('language', 'en')
+        print(f"Language from request: {previous_language}")
+        
+        print("\n=== Language Processing ===")
+        # Procesar el texto con el idioma anterior como referencia
+        text_processing_result = chatgpt.process_text_input(data['text'], previous_language)
+        detected_language = text_processing_result.get('detected_language', 'en')
+        print(f"Text processing result: {text_processing_result}")
+        print(f"Detected language: {detected_language}")
+        
+        # Actualizar idioma global
+        LAST_DETECTED_LANGUAGE = detected_language
+        print(f"Updated LAST_DETECTED_LANGUAGE to: {LAST_DETECTED_LANGUAGE}")
+
+        print("\n=== Name Extraction ===")
         name_extraction_result = chatgpt.extract_name(data['text'])
+        print(f"Name extraction result: {name_extraction_result}")
 
         if not name_extraction_result['success']:
+            print("Error: No valid name found")
             return jsonify({
                 'success': False, 
                 'message': 'No valid name found in text'
@@ -312,18 +355,18 @@ def capture_name():
 
         name = name_extraction_result['name']
         is_registered = data['is_registered']
+        print(f"Extracted name: {name}")
+        print(f"Is registered: {is_registered}")
 
-        text_processing_result = chatgpt.process_text_input(name)
-        detected_language = text_processing_result.get('detected_language', 'en')
-
+        print("\n=== Message Translation ===")
         if is_registered:
-            # Usuario registrado: preguntar sobre conexión con expertos
             base_message = f"Welcome back {name}! Would you like to connect with our experts?"
             translated_message = chatgpt.translate_message(base_message, detected_language)
+            print(f"Translated welcome message: {translated_message}")
             
-            # Traducir opciones Sí/No
             yes_option = chatgpt.translate_message("yes", detected_language)
             no_option = chatgpt.translate_message("no", detected_language)
+            print(f"Translated options: yes={yes_option}, no={no_option}")
 
             response = {
                 'success': True,
@@ -335,15 +378,15 @@ def capture_name():
                 'options': [yes_option, no_option]
             }
         else:
-            # Usuario no registrado: proponer contacto con agente
             base_message = f"Thank you {name}! To better assist you, we recommend speaking with one of our agents."
             translated_message = chatgpt.translate_message(base_message, detected_language)
+            print(f"Translated thank you message: {translated_message}")
             
-            # Traducir mensaje de booking
             booking_message = chatgpt.translate_message(
                 "Would you like to schedule a call?",
                 detected_language
             )
+            print(f"Translated booking message: {booking_message}")
 
             response = {
                 'success': True,
@@ -357,18 +400,27 @@ def capture_name():
                 'booking_link': "https://calendly.com/your-booking-link"
             }
 
+        print("\n=== Final Response ===")
+        print(f"Sending response: {response}")
         return jsonify(response)
 
     except Exception as e:
+        print(f"\n=== Error Handling ===")
         print(f"Error in name capture: {str(e)}")
         error_message = "An error occurred while processing your request."
-        if 'chatgpt' in locals() and 'detected_language' in locals():
-            error_message = chatgpt.translate_message(error_message, detected_language)
+        if 'chatgpt' in locals():
+            error_message = chatgpt.translate_message(
+                error_message, 
+                detected_language if 'detected_language' in locals() else 'en'
+            )
+        print(f"Translated error message: {error_message}")
         return jsonify({
             'success': False,
             'error': error_message
         }), 500
-    
+
+
+
 
 
 
@@ -376,10 +428,16 @@ def capture_name():
 @app.route('/api/ai/expert-connection/ask', methods=['POST'])
 def ask_expert_connection():
     try:
+        global LAST_DETECTED_LANGUAGE
+        print("\n=== Language Detection Debug ===")
+        print(f"Previous detected language (global): {LAST_DETECTED_LANGUAGE}")
+        
         data = request.json
+        print(f"Received data: {data}")
         
         required_fields = ['text', 'name']
         if not all(field in data for field in required_fields):
+            print("Error: Missing required fields")
             return jsonify({
                 'success': False,
                 'message': 'Required fields missing: text, name'
@@ -387,18 +445,30 @@ def ask_expert_connection():
 
         text = data['text']
         name = data['name']
+        print(f"Processing text: {text}")
+        print(f"User name: {name}")
 
         chatgpt = ChatGPTHelper()
         
-        # Primero procesamos el texto para detectar/confirmar el idioma
-        text_processing_result = chatgpt.process_text_input(text)
+        print("\n=== Language Processing ===")
+        # Usar el idioma global como referencia
+        text_processing_result = chatgpt.process_text_input(text, LAST_DETECTED_LANGUAGE)
         detected_language = text_processing_result.get('detected_language', 'en')
+        print(f"Text processing result: {text_processing_result}")
+        print(f"Detected language: {detected_language}")
+        
+        # Actualizar idioma global
+        LAST_DETECTED_LANGUAGE = detected_language
+        print(f"Updated LAST_DETECTED_LANGUAGE to: {LAST_DETECTED_LANGUAGE}")
 
-        # Luego extraemos la intención
+        print("\n=== Intention Extraction ===")
         intention_result = chatgpt.extract_intention(text)
+        print(f"Intention result: {intention_result}")
 
         if not intention_result['success']:
+            print("Error: Invalid intention")
             translated_error = chatgpt.translate_message(intention_result['error'], detected_language)
+            print(f"Translated error: {translated_error}")
             return jsonify({
                 'success': False,
                 'error': translated_error,
@@ -406,63 +476,80 @@ def ask_expert_connection():
             }), 400
 
         intention = intention_result['intention']
+        print(f"Extracted intention: {intention}")
 
+        print("\n=== Response Generation ===")
         if intention == 'yes':
             base_message = f"Excellent! What sector interests you the most? Choose from:\n\n1. Technology\n2. Healthcare\n3. Finance\n4. Education\n5. Other"
             translated_message = chatgpt.translate_message(base_message, detected_language)
-            return jsonify({
+            print(f"Translated positive response: {translated_message}")
+            
+            response = {
                 'success': True,
                 'name': name,
                 'detected_language': detected_language,
                 'step': 'select_sector',
                 'message': translated_message,
                 'next_action': 'process_sector_selection'
-            })
+            }
 
         elif intention == 'no':
             base_message = f"I understand, {name}. Feel free to come back when you'd like to connect with our experts. Have a great day!"
             translated_message = chatgpt.translate_message(base_message, detected_language)
-            return jsonify({
+            print(f"Translated negative response: {translated_message}")
+            
+            response = {
                 'success': True,
                 'name': name,
                 'detected_language': detected_language,
                 'step': 'farewell',
                 'message': translated_message,
                 'next_action': 'end_conversation'
-            })
+            }
 
         else:  # intention is 'unclear'
             base_message = "I'm not sure if that's a yes or no. Could you please clarify?"
             translated_message = chatgpt.translate_message(base_message, detected_language)
-            return jsonify({
+            print(f"Translated unclear response: {translated_message}")
+            
+            response = {
                 'success': True,
                 'message': translated_message,
                 'detected_language': detected_language,
                 'step': 'clarify'
-            })
+            }
+
+        print("\n=== Final Response ===")
+        print(f"Sending response: {response}")
+        return jsonify(response)
 
     except Exception as e:
+        print(f"\n=== Error Handling ===")
         print(f"Error in expert connection answer: {str(e)}")
         error_message = "An error occurred while processing your request."
         translated_error = chatgpt.translate_message(
             error_message, 
             detected_language if 'detected_language' in locals() else 'en'
         )
+        print(f"Translated error message: {translated_error}")
         return jsonify({
             'success': False,
             'error': translated_error
         }), 500
 
 
-
-
-
-
 @app.route('/api/sector-experience', methods=['POST'])
 def sector_experience():
     try:
+        global LAST_DETECTED_LANGUAGE
+        print("\n=== Language Detection Debug ===")
+        print(f"Previous detected language (global): {LAST_DETECTED_LANGUAGE}")
+        
         data = request.json
+        print(f"Received data: {data}")
+        
         if 'sector' not in data:
+            print("Error: Missing sector specification")
             base_error = 'A sector specification is required'
             return jsonify({
                 'success': False,
@@ -471,73 +558,94 @@ def sector_experience():
 
         chatgpt = ChatGPTHelper()
         
-        # Detectar idioma del texto de entrada
-        text_processing_result = chatgpt.process_text_input(data['sector'])
+        print("\n=== Language Processing ===")
+        # Usar el idioma global como referencia
+        text_processing_result = chatgpt.process_text_input(data['sector'], LAST_DETECTED_LANGUAGE)
         detected_language = text_processing_result.get('detected_language', 'en')
+        print(f"Text processing result: {text_processing_result}")
+        print(f"Detected language: {detected_language}")
         
-        # Extract sector from user input
+        # Actualizar idioma global
+        LAST_DETECTED_LANGUAGE = detected_language
+        print(f"Updated LAST_DETECTED_LANGUAGE to: {LAST_DETECTED_LANGUAGE}")
+        
+        print("\n=== Sector Extraction ===")
         raw_sector_text = data['sector']
         sector = chatgpt.extract_sector(raw_sector_text)
+        print(f"Raw sector text: {raw_sector_text}")
+        print(f"Extracted sector: {sector}")
         
         if not sector:
+            print("Error: Invalid sector")
             error_message = 'Could not identify a valid sector from the provided text'
             translated_error = chatgpt.translate_message(error_message, detected_language)
+            print(f"Translated error: {translated_error}")
             return jsonify({
                 'success': False,
                 'message': translated_error
             }), 400
 
-        # Base messages in English
+        print("\n=== Message Translation ===")
         BASE_MESSAGES = {
             'sector_received': "Thank you for specifying the {sector} sector.",
             'ask_region': "Which region are you interested in? (e.g., North America, Europe, Asia, etc.)",
             'processing_error': "Error processing your request"
         }
 
-        # Build the base message
         base_message = (
             f"{BASE_MESSAGES['sector_received'].format(sector=sector)} "
             f"{BASE_MESSAGES['ask_region']}"
         )
         response_message = chatgpt.translate_message(base_message, detected_language)
+        print(f"Base message: {base_message}")
+        print(f"Translated message: {response_message}")
 
-        # Prepare additional messages if needed
         additional_messages = {}
         if 'additional_info' in data:
+            print("\n=== Additional Info Processing ===")
             confirmation_message = "Additional information has been registered successfully"
             additional_messages['confirmation'] = chatgpt.translate_message(
                 confirmation_message,
                 detected_language
             )
+            print(f"Additional info present: {data['additional_info']}")
+            print(f"Translated confirmation: {additional_messages['confirmation']}")
 
         response = {
             'success': True,
             'message': response_message,
             'has_additional_info': 'additional_info' in data and bool(data['additional_info']),
             'sector': sector,
-            'detected_language': detected_language  # Cambiado de 'language' a 'detected_language'
+            'detected_language': detected_language
         }
 
         if additional_messages:
             response['additional_messages'] = additional_messages
 
+        print("\n=== Final Response ===")
+        print(f"Sending response: {response}")
         return jsonify(response)
 
     except Exception as e:
+        print(f"\n=== Error Handling ===")
         print(f"Error in sector experience: {str(e)}")
         error_message = BASE_MESSAGES['processing_error']
         translated_error = chatgpt.translate_message(error_message, detected_language)
+        print(f"Translated error message: {translated_error}")
         return jsonify({
             'success': False,
             'message': translated_error,
             'error': str(e),
             'detected_language': detected_language
         }), 500
+    
 
-
+    
 @app.route('/api/ai/test/process-text', methods=['POST'])
 def test_process_text():
     try:
+        global LAST_DETECTED_LANGUAGE
+        
         data = request.json
         if 'text' not in data:
             base_error = 'Text is required'
@@ -548,13 +656,20 @@ def test_process_text():
 
         chatgpt = ChatGPTHelper()
         
-        # Detectar el idioma automáticamente usando process_text_input
-        text_processing_result = chatgpt.process_text_input(data['text'])
+        print("\n=== Language Processing ===")
+        text_processing_result = chatgpt.process_text_input(data['text'], LAST_DETECTED_LANGUAGE)
         detected_language = text_processing_result.get('detected_language', 'en')
+        print(f"Text processing result: {text_processing_result}")
+        print(f"Detected language: {detected_language}")
         
-        # Extract region from user input
+        LAST_DETECTED_LANGUAGE = detected_language
+        print(f"Updated LAST_DETECTED_LANGUAGE to: {LAST_DETECTED_LANGUAGE}")
+        
+        print("\n=== Region Extraction ===")
         raw_region_text = data['text']
         region = chatgpt.extract_region(raw_region_text)
+        print(f"Raw region text: {raw_region_text}")
+        print(f"Extracted region: {region}")
         
         if not region:
             return jsonify({
@@ -562,27 +677,30 @@ def test_process_text():
                 'message': 'Could not identify a valid region from the provided text'
             }), 400
 
-        # Base messages in English
         BASE_MESSAGES = {
             'region_received': "Thank you for specifying the region.",
             'ask_companies': "Are there specific companies where you would like experts to have experience? Please enter the names separated by commas or answer 'no'.",
             'processing_error': "Error processing your request"
         }
 
-        # Build the base message
+        print("\n=== Message Translation ===")
         base_message = (
             f"{BASE_MESSAGES['region_received'].format(region=region)} "
             f"{BASE_MESSAGES['ask_companies']}"
         )
+        print(f"Base message: {base_message}")
         next_question = chatgpt.translate_message(base_message, detected_language)
+        print(f"Translated next question: {next_question}")
 
         result = {
             'success': True,
             'processed_region': region,
             'next_question': next_question,
-            'detected_language': detected_language  # Cambiado de 'language' a 'detected_language'
+            'detected_language': detected_language
         }
 
+        print("\n=== Final Response ===")
+        print(f"Sending response: {result}")
         return jsonify(result)
 
     except Exception as e:
@@ -593,20 +711,22 @@ def test_process_text():
             'success': False,
             'message': translated_error,
             'error': str(e),
-            'detected_language': detected_language  # Cambiado aquí también
+            'detected_language': detected_language
         }), 500
-
-
-
-
-
 
 
 @app.route('/api/simple-expert-connection', methods=['POST'])
 def simple_expert_connection():
     try:
+        global LAST_DETECTED_LANGUAGE
+        print("\n=== Previous Language State ===")
+        print(f"Last detected language was: {LAST_DETECTED_LANGUAGE}")
+        
         data = request.json
+        print(f"Received data: {data}")
+        
         if 'answer' not in data:
+            print("Error: Missing answer field")
             base_error = 'An answer is required'
             return jsonify({
                 'success': False,
@@ -615,53 +735,72 @@ def simple_expert_connection():
 
         chatgpt = ChatGPTHelper()
         
-        # Detectar idioma automáticamente
-        text_processing_result = chatgpt.process_text_input(data['answer'])
+        print("\n=== Language Processing ===")
+        # Detectar idioma automáticamente usando el idioma anterior como referencia
+        text_processing_result = chatgpt.process_text_input(data['answer'], LAST_DETECTED_LANGUAGE)
         detected_language = text_processing_result.get('detected_language', 'en')
+        print(f"Text processing result: {text_processing_result}")
+        print(f"Detected language: {detected_language}")
         
-        # Extract companies from user input
+        # Actualizar idioma global
+        LAST_DETECTED_LANGUAGE = detected_language
+        print(f"Updated LAST_DETECTED_LANGUAGE to: {LAST_DETECTED_LANGUAGE}")
+        
+        print("\n=== Company Processing ===")
         answer = data['answer']
         companies_response = chatgpt.process_company_response(answer)
+        print(f"Companies response: {companies_response}")
         
         if companies_response is None:
+            print("Error: Invalid company response")
             error_message = 'Could not process the company response properly'
             translated_error = chatgpt.translate_message(error_message, detected_language)
+            print(f"Translated error: {translated_error}")
             return jsonify({
                 'success': False,
                 'message': translated_error
             }), 400
 
-        # Base messages in English
+        print("\n=== Message Translation ===")
         BASE_MESSAGES = {
             'positive_response': "We have registered your interest in the following companies: {companies}",
             'negative_response': "No problem! We will proceed with the general process.",
             'processing_error': "Error processing your request"
         }
 
-        # Build and translate the response message
         if companies_response == "no":
+            print("Processing negative response")
             response_message = chatgpt.translate_message(BASE_MESSAGES['negative_response'], detected_language)
             interested_in_companies = False
             companies = []
         else:
+            print("Processing positive response")
             response_message = chatgpt.translate_message(
                 BASE_MESSAGES['positive_response'].format(companies=", ".join(companies_response['companies'])),
                 detected_language
             )
             interested_in_companies = True
             companies = companies_response['companies']
+        
+        print(f"Translated response message: {response_message}")
 
-        return jsonify({
+        result = {
             'success': True,
             'message': response_message,
             'interested_in_companies': interested_in_companies,
             'companies': companies,
             'detected_language': detected_language
-        })
+        }
+
+        print("\n=== Final Response ===")
+        print(f"Sending response: {result}")
+        return jsonify(result)
 
     except Exception as e:
+        print(f"\n=== Error Handling ===")
         print(f"Error: {str(e)}")
         error_message = chatgpt.translate_message(BASE_MESSAGES['processing_error'], detected_language)
+        print(f"Translated error message: {error_message}")
         return jsonify({
             'success': False,
             'message': error_message,
@@ -671,16 +810,22 @@ def simple_expert_connection():
 
 
 
+
 @app.route('/api/company-suggestions-test', methods=['POST'])
 def company_suggestions_test():
     try:
+        global LAST_DETECTED_LANGUAGE
+        print("\n=== Previous Language State ===")
+        print(f"Last detected language was: {LAST_DETECTED_LANGUAGE}")
+        
         data = request.json
+        print(f"Received data: {data}")
         
         # Validación de campos requeridos
         required_fields = ['sector', 'processed_region']
         if not all(field in data for field in required_fields):
+            print("Error: Missing required fields")
             error_message = 'Sector and region are required'
-            # Traducir mensaje de error de validación
             translated_error = chatgpt.translate_message(error_message, data.get('language', 'en'))
             return jsonify({
                 'success': False,
@@ -690,44 +835,60 @@ def company_suggestions_test():
         chatgpt = ChatGPTHelper()
         sector = data['sector']
         location = data['processed_region']
-        detected_language = data.get('language', 'en')
+        
+        # Usar el texto y el contexto anterior para detectar el idioma
+        text_to_analyze = f"{sector} {location.get('original_location', '')}"
+        text_processing_result = chatgpt.process_text_input(text_to_analyze, LAST_DETECTED_LANGUAGE)
+        detected_language = text_processing_result.get('detected_language', 'en')
+        
         interested_in_companies = data.get('interested_in_companies', False)
         companies_list = data.get('companies', [])
 
-        # Traducir nombres de sectores para la comparación
-        tech_sectors = ['technology', 'tecnología', 'tech', 'tecnologia']
-        sector_translated = chatgpt.translate_message(sector, 'en').lower()  # Traducir al inglés para comparar
+        print("\n=== Input Processing ===")
+        print(f"Sector: {sector}")
+        print(f"Location: {location}")
+        print(f"Detected language: {detected_language}")
+        
+        # Actualizar idioma global
+        LAST_DETECTED_LANGUAGE = detected_language
+        print(f"Updated LAST_DETECTED_LANGUAGE to: {LAST_DETECTED_LANGUAGE}")
 
-        # Definición de compañías ficticias - Considerar traducir sus nombres
+        print("\n=== Sector Translation ===")
+        tech_sectors = ['technology', 'tecnología', 'tech', 'tecnologia']
+        sector_translated = chatgpt.translate_message(sector, 'en').lower()
+        print(f"Translated sector: {sector_translated}")
+
+        print("\n=== Companies Generation ===")
         TECH_FICTIONAL_COMPANIES = [
             chatgpt.translate_message("Company 1 Tech Solutions", detected_language),
             chatgpt.translate_message("Company 2 Digital Systems", detected_language),
             chatgpt.translate_message("Company 3 Innovation Labs", detected_language)
         ]
+        print(f"Fictional companies translated: {TECH_FICTIONAL_COMPANIES}")
 
-        # Obtener sugerencias de ChatGPT
         chatgpt_result = chatgpt.get_companies_suggestions(
             sector=sector,
             geography=location
         )
+        print(f"ChatGPT suggestions result: {chatgpt_result}")
 
-        # Procesamiento de compañías según el sector
         if sector_translated in tech_sectors:
             all_companies = TECH_FICTIONAL_COMPANIES + chatgpt_result['content']
         else:
             all_companies = chatgpt_result['content']
 
-        # Procesamiento de compañías de interés
+        print("\n=== Companies Processing ===")
         if interested_in_companies and companies_list:
+            print(f"Processing companies of interest: {companies_list}")
             final_companies = [comp for comp in all_companies if comp not in companies_list]
             final_companies = companies_list + final_companies
         else:
             final_companies = all_companies
-
-        # Limitar a 20 compañías
+        
         final_companies = final_companies[:20]
+        print(f"Final companies list: {final_companies}")
 
-        # Preparación del mensaje de respuesta
+        print("\n=== Message Translation ===")
         if interested_in_companies and companies_list:
             companies_str = ", ".join(companies_list)
             base_message = chatgpt.translate_message(
@@ -735,35 +896,41 @@ def company_suggestions_test():
                 detected_language
             )
         else:
-            # Traducir la estructura completa del mensaje
             message_template = "Here are the suggested companies:"
             base_message = chatgpt.translate_message(
                 message_template,
                 detected_language
             )
+        print(f"Base message translated: {base_message}")
 
-        # Traducir pregunta de confirmación
         confirmation_question = chatgpt.translate_message(
             "\n\nDo you agree with this list?",
             detected_language
         )
+        print(f"Confirmation question translated: {confirmation_question}")
 
         final_message = base_message + confirmation_question
 
-        return jsonify({
+        result = {
             'success': True,
             'companies': final_companies,
             'interested_in_companies': interested_in_companies,
             'language': detected_language,
             'message': final_message
-        })
+        }
+
+        print("\n=== Final Response ===")
+        print(f"Sending response: {result}")
+        return jsonify(result)
 
     except Exception as e:
+        print(f"\n=== Error Handling ===")
         print(f"Error in company suggestions: {str(e)}")
         error_message = chatgpt.translate_message(
             "An error occurred while processing your request.",
             detected_language if 'detected_language' in locals() else 'en'
         )
+        print(f"Translated error message: {error_message}")
         return jsonify({
             'success': False,
             'message': error_message,
@@ -773,11 +940,20 @@ def company_suggestions_test():
         }), 500
 
 
+
+
 @app.route('/api/process-companies-agreement', methods=['POST'])
 def process_companies_agreement():
     try:
+        global LAST_DETECTED_LANGUAGE
+        print("\n=== Previous Language State ===")
+        print(f"Last detected language was: {LAST_DETECTED_LANGUAGE}")
+        
         data = request.json
+        print(f"Received data: {data}")
+        
         if 'text' not in data:
+            print("Error: Missing text field")
             return jsonify({
                 'success': False,
                 'message': 'Text is required'
@@ -785,70 +961,106 @@ def process_companies_agreement():
 
         chatgpt = ChatGPTHelper()
         
-        # Usar process_text_input para detectar el idioma del texto de entrada
-        text_processing_result = chatgpt.process_text_input(data['text'])
+        print("\n=== Language Processing ===")
+        # Usar el idioma global como referencia
+        text_processing_result = chatgpt.process_text_input(data['text'], LAST_DETECTED_LANGUAGE)
         detected_language = text_processing_result.get('detected_language', 'en')
+        print(f"Text processing result: {text_processing_result}")
+        print(f"Detected language: {detected_language}")
         
-        # Extract agreement using existing extract_intention
+        # Actualizar idioma global
+        LAST_DETECTED_LANGUAGE = detected_language
+        print(f"Updated LAST_DETECTED_LANGUAGE to: {LAST_DETECTED_LANGUAGE}")
+        
+        print("\n=== Intention Extraction ===")
         text = data['text']
         intention = chatgpt.extract_intention(text)
+        print(f"Extracted intention: {intention}")
         
         if intention is None:
+            print("Error: Could not determine intention")
             error_message = 'Could not determine if you agree with the list. Please answer yes or no.'
             translated_error = chatgpt.translate_message(error_message, detected_language)
+            print(f"Translated error: {translated_error}")
             return jsonify({
                 'success': False,
                 'message': translated_error
             }), 400
 
-        # Base messages in English
         BASE_MESSAGES = {
             'positive_response': "Great! Let's proceed with these companies.",
             'negative_response': "I'll help you find different company suggestions.",
             'processing_error': "Error processing your request"
         }
 
-        # Verificar la intención correctamente
+        print("\n=== Response Generation ===")
         is_positive = intention.get('intention', '').lower() == 'yes'
+        print(f"Is positive response: {is_positive}")
         
-        # Select appropriate message based on intention and traducir
         response_message = BASE_MESSAGES['positive_response'] if is_positive else BASE_MESSAGES['negative_response']
         translated_message = chatgpt.translate_message(response_message, detected_language)
+        print(f"Base message: {response_message}")
+        print(f"Translated message: {translated_message}")
 
-        return jsonify({
+        result = {
             'success': True,
             'message': translated_message,
             'agreed': intention,
-            'detected_language': detected_language  # Cambiado de 'language' a 'detected_language'
-        })
+            'detected_language': detected_language
+        }
+
+        print("\n=== Final Response ===")
+        print(f"Sending response: {result}")
+        return jsonify(result)
 
     except Exception as e:
+        print(f"\n=== Error Handling ===")
         print(f"Error in process companies agreement: {str(e)}")
         error_message = BASE_MESSAGES['processing_error']
         translated_error = chatgpt.translate_message(error_message, detected_language)
+        print(f"Translated error message: {translated_error}")
         return jsonify({
             'success': False,
             'message': translated_error,
             'error': str(e),
-            'detected_language': detected_language  # Cambiado aquí también
+            'detected_language': detected_language
         }), 500
+   
+   
+   
     """"""""""""""""""""""""""""""""""""""""2"""
 ######################################################################################################
 ####################################### FASE3##########################################################
 
 
+
+
 @app.route('/api/specify-employment-status', methods=['POST'])
 def specify_employment_status():
     try:
+        global LAST_DETECTED_LANGUAGE
+        print("\n=== Previous Language State ===")
+        print(f"Last detected language was: {LAST_DETECTED_LANGUAGE}")
+        
         data = request.json
+        print(f"Received data: {data}")
+        
         chatgpt = ChatGPTHelper()
 
+        print("\n=== Language Processing ===")
         # Detectar idioma usando process_text_input si hay status
         if 'status' in data:
-            text_processing_result = chatgpt.process_text_input(data['status'])
+            text_processing_result = chatgpt.process_text_input(data['status'], LAST_DETECTED_LANGUAGE)
             detected_language = text_processing_result.get('detected_language', 'en')
+            print(f"Text processing result: {text_processing_result}")
+            print(f"Detected language: {detected_language}")
+            
+            # Actualizar idioma global
+            LAST_DETECTED_LANGUAGE = detected_language
+            print(f"Updated LAST_DETECTED_LANGUAGE to: {LAST_DETECTED_LANGUAGE}")
         else:
-            detected_language = data.get('language', 'en')  # Mantener el idioma heredado si no hay texto nuevo
+            detected_language = LAST_DETECTED_LANGUAGE
+            print(f"Using inherited language: {detected_language}")
 
         BASE_MESSAGES = {
             'ask_preference': "Would you prefer experts who currently work at these companies, who worked there previously, or both options?",
@@ -866,6 +1078,7 @@ def specify_employment_status():
             return chatgpt.translate_message(message, detected_language)
 
         def normalize_status(status_text):
+            print(f"\nNormalizing status: {status_text}")
             status_text = status_text.strip().lower()
             
             status_mapping = {
@@ -876,64 +1089,84 @@ def specify_employment_status():
             
             for status, variants in status_mapping.items():
                 if any(variant in status_text for variant in variants):
+                    print(f"Matched status: {status}")
                     return status
-                    
+            
+            print("No status match found")
             return None
 
         # Si no hay status, devolver la pregunta
         if 'status' not in data:
+            print("\n=== Initial Question ===")
+            translated_question = get_message(BASE_MESSAGES['ask_preference'])
+            print(f"Translated initial question: {translated_question}")
             return jsonify({
                 'success': True,
-                'message': get_message(BASE_MESSAGES['ask_preference']),
+                'message': translated_question,
                 'has_status': False,
-                'detected_language': detected_language  # Cambiado de 'language' a 'detected_language'
+                'detected_language': detected_language
             })
 
+        print("\n=== Status Processing ===")
         # Intentar primero con extract_work_timing
         status = chatgpt.extract_work_timing(data['status'])
+        print(f"Work timing extraction result: {status}")
         
         # Si no funciona, seguir con la normalización normal
         if not status:
+            print("Trying normal normalization")
             user_status = data['status'].strip().lower()
             status = normalize_status(user_status)
 
             # Si no se pudo normalizar, intentar con ChatGPT
             if status is None:
+                print("Trying ChatGPT normalization")
                 normalize_prompt = BASE_MESSAGES['normalize_prompt'] + data['status']
                 normalized_status = chatgpt.translate_message(normalize_prompt, 'en').strip().lower()
                 status = normalize_status(normalized_status)
+                print(f"ChatGPT normalized status: {status}")
 
+        print("\n=== Response Generation ===")
         if status:
+            print(f"Valid status found: {status}")
             status_message = BASE_MESSAGES['status_options'][status]
             response_message = get_message(status_message)
+            print(f"Translated response: {response_message}")
             
-            return jsonify({
+            result = {
                 'success': True,
                 'message': response_message,
                 'has_status': True,
                 'employment_status': status,
                 'detected_language': detected_language
-            })
+            }
         else:
+            print("Invalid status")
             error_message = get_message(BASE_MESSAGES['invalid_option'])
-            return jsonify({
+            print(f"Translated error: {error_message}")
+            result = {
                 'success': False,
                 'message': error_message,
                 'has_status': False,
                 'detected_language': detected_language
-            }), 400
+            }
+            return jsonify(result), 400
+
+        print("\n=== Final Response ===")
+        print(f"Sending response: {result}")
+        return jsonify(result)
 
     except Exception as e:
+        print(f"\n=== Error Handling ===")
         print(f"Error in specify employment status: {str(e)}")
         error_message = get_message(BASE_MESSAGES['processing_error'])
+        print(f"Translated error message: {error_message}")
         return jsonify({
             'success': False,
             'message': error_message,
             'error': str(e),
             'detected_language': detected_language
         }), 500
-
-
 
 
 
@@ -941,17 +1174,30 @@ def specify_employment_status():
 @app.route('/api/exclude-companies', methods=['POST'])
 def exclude_companies():
     try:
+        global LAST_DETECTED_LANGUAGE
+        print("\n=== Previous Language State ===")
+        print(f"Last detected language was: {LAST_DETECTED_LANGUAGE}")
+        
         data = request.json
+        print(f"Received data: {data}")
+        
         chatgpt = ChatGPTHelper()
 
+        print("\n=== Language Processing ===")
         # Detectar idioma usando process_text_input si hay respuesta
         if 'answer' in data:
-            text_processing_result = chatgpt.process_text_input(data['answer'])
+            text_processing_result = chatgpt.process_text_input(data['answer'], LAST_DETECTED_LANGUAGE)
             detected_language = text_processing_result.get('detected_language', 'en')
+            print(f"Text processing result: {text_processing_result}")
+            print(f"Detected language: {detected_language}")
+            
+            # Actualizar idioma global
+            LAST_DETECTED_LANGUAGE = detected_language
+            print(f"Updated LAST_DETECTED_LANGUAGE to: {LAST_DETECTED_LANGUAGE}")
         else:
-            detected_language = data.get('language', 'en')  # Mantener idioma heredado si no hay texto nuevo
+            detected_language = LAST_DETECTED_LANGUAGE
+            print(f"Using inherited language: {detected_language}")
 
-        # Mensajes base en inglés
         BASE_MESSAGES = {
             'ask_exclusions': "Are there any companies that should be excluded from the search? Please enter the names separated by commas or answer 'no'.",
             'no_exclusions': "Understood, there are no companies to exclude.",
@@ -959,29 +1205,34 @@ def exclude_companies():
             'processing_error': "An error occurred while processing your request."
         }
 
-        # Función para traducir mensajes
         def get_message(message):
             return chatgpt.translate_message(message, detected_language)
 
         # Si no hay answer, devolver la pregunta inicial
         if 'answer' not in data:
+            print("\n=== Initial Question ===")
+            initial_message = get_message(BASE_MESSAGES['ask_exclusions'])
+            print(f"Translated initial question: {initial_message}")
             return jsonify({
                 'success': True,
-                'message': get_message(BASE_MESSAGES['ask_exclusions']),
+                'message': initial_message,
                 'detected_language': detected_language,
                 'has_excluded_companies': False,
                 'excluded_companies': None
             })
 
-        # Procesar la respuesta con ChatGPT
+        print("\n=== Company Response Processing ===")
         processed_response = chatgpt.process_company_response(data['answer'])
+        print(f"Processed response: {processed_response}")
 
-        # Procesar la respuesta
+        print("\n=== Response Generation ===")
         if processed_response == "no" or data['answer'].lower() in ['no', 'n']:
+            print("No companies to exclude")
             base_message = BASE_MESSAGES['no_exclusions']
             excluded_companies = None
             has_excluded_companies = False
         elif isinstance(processed_response, dict):
+            print(f"Companies to exclude: {processed_response['companies']}")
             companies_list = ", ".join(processed_response['companies'])
             base_message = BASE_MESSAGES['exclusions_confirmed'].format(
                 companies=companies_list
@@ -989,34 +1240,39 @@ def exclude_companies():
             excluded_companies = processed_response['companies']
             has_excluded_companies = True
         else:
+            print("Invalid response format")
             base_message = BASE_MESSAGES['ask_exclusions']
             excluded_companies = None
             has_excluded_companies = False
 
-        # Traducir mensaje de respuesta
+        print("\n=== Message Translation ===")
         response_message = get_message(base_message)
+        print(f"Base message: {base_message}")
+        print(f"Translated message: {response_message}")
 
-        return jsonify({
+        result = {
             'success': True,
             'message': response_message,
             'detected_language': detected_language,
             'has_excluded_companies': has_excluded_companies,
             'excluded_companies': excluded_companies
-        })
+        }
+
+        print("\n=== Final Response ===")
+        print(f"Sending response: {result}")
+        return jsonify(result)
 
     except Exception as e:
+        print(f"\n=== Error Handling ===")
         print(f"Error in exclude companies: {str(e)}")
         error_message = get_message(BASE_MESSAGES['processing_error'])
+        print(f"Translated error message: {error_message}")
         return jsonify({
             'success': False,
             'message': error_message,
             'error': str(e),
             'detected_language': detected_language
         }), 500
-
-
-
-
 
 
 
@@ -1027,30 +1283,48 @@ def exclude_companies():
 @app.route('/api/client-perspective', methods=['POST'])
 def client_perspective():
     try:
+        global LAST_DETECTED_LANGUAGE
+        print("\n=== Previous Language State ===")
+        print(f"Last detected language was: {LAST_DETECTED_LANGUAGE}")
+        
         data = request.json
-        answer = data.get('answer', '')  # Obtener answer, si no existe será string vacío
+        print(f"Received data: {data}")
+        
+        answer = data.get('answer', '')
+        print(f"Extracted answer: {answer}")
+        
         chatgpt = ChatGPTHelper()
         
-        # Detectar el idioma
-        text_processing_result = chatgpt.process_text_input(answer if answer else "test")
+        print("\n=== Language Processing ===")
+        # Usar el idioma global como referencia
+        text_processing_result = chatgpt.process_text_input(answer if answer else "test", LAST_DETECTED_LANGUAGE)
         detected_language = text_processing_result.get('detected_language', 'en')
+        print(f"Text processing result: {text_processing_result}")
+        print(f"Detected language: {detected_language}")
+        
+        # Actualizar idioma global
+        LAST_DETECTED_LANGUAGE = detected_language
+        print(f"Updated LAST_DETECTED_LANGUAGE to: {LAST_DETECTED_LANGUAGE}")
 
         # Si answer está vacío, solo enviar la pregunta inicial
         if not answer:
+            print("\n=== Initial Question Generation ===")
             initial_question = "Would you be interested in receiving industry perspectives from the client side?"
-            # Traducir la pregunta al idioma detectado
             translated_question = chatgpt.translate_message(initial_question, detected_language)
+            print(f"Initial question: {initial_question}")
+            print(f"Translated question: {translated_question}")
             return jsonify({
                 'success': True,
                 'message': translated_question,
                 'detected_language': detected_language
             })
 
-        # Si hay una respuesta, procesarla
+        print("\n=== Intention Processing ===")
         intention_result = chatgpt.extract_intention(answer)
         intention = intention_result.get('intention') if intention_result.get('success') else None
+        print(f"Intention result: {intention_result}")
+        print(f"Extracted intention: {intention}")
 
-        # Mensajes base en inglés
         BASE_MESSAGES = {
             'confirmed_yes': "Great! I will include experts with client-side perspective in the search.",
             'confirmed_no': "Understood. I will focus on other perspectives in the search.",
@@ -1058,38 +1332,50 @@ def client_perspective():
             'invalid_response': "Could not determine your preference. Please answer yes or no."
         }
 
-        # Procesar la respuesta basada en la intención extraída
+        print("\n=== Response Generation ===")
         if intention == 'yes':
+            print("Processing positive response")
             base_message = BASE_MESSAGES['confirmed_yes']
             client_perspective = True
         elif intention == 'no':
+            print("Processing negative response")
             base_message = BASE_MESSAGES['confirmed_no']
             client_perspective = False
         else:
+            print("Processing invalid response")
             error_message = chatgpt.translate_message(BASE_MESSAGES['invalid_response'], detected_language)
+            print(f"Translated error: {error_message}")
             return jsonify({
                 'success': False,
                 'message': error_message,
                 'detected_language': detected_language
             }), 400
 
-        # Traducir mensaje de respuesta
+        print("\n=== Message Translation ===")
         response_message = chatgpt.translate_message(base_message, detected_language)
+        print(f"Base message: {base_message}")
+        print(f"Translated message: {response_message}")
 
-        return jsonify({
+        result = {
             'success': True,
             'message': response_message,
             'detected_language': detected_language,
             'client_perspective': client_perspective,
             'answer_received': intention
-        })
+        }
+
+        print("\n=== Final Response ===")
+        print(f"Sending response: {result}")
+        return jsonify(result)
 
     except Exception as e:
+        print(f"\n=== Error Handling ===")
         print(f"Error in client perspective: {str(e)}")
         error_message = chatgpt.translate_message(
             BASE_MESSAGES['processing_error'],
             detected_language if 'detected_language' in locals() else 'en'
         )
+        print(f"Translated error message: {error_message}")
         return jsonify({
             'success': False,
             'message': error_message,
@@ -1117,21 +1403,32 @@ def client_perspective():
 
 
 
-
-
-
 @app.route('/api/supply-chain-experience', methods=['POST'])
 def supply_chain_experience():
     try:
+        global LAST_DETECTED_LANGUAGE
+        print("\n=== Previous Language State ===")
+        print(f"Last detected language was: {LAST_DETECTED_LANGUAGE}")
+        
         data = request.json
-        answer = data.get('answer', '')  # Obtener answer con valor por defecto vacío
+        print(f"Received data: {data}")
+        
+        answer = data.get('answer', '')
+        print(f"Extracted answer: {answer}")
+        
         chatgpt = ChatGPTHelper()
         
-        # Detectar el idioma
-        text_processing_result = chatgpt.process_text_input(answer if answer else "test")
+        print("\n=== Language Processing ===")
+        # Usar el idioma global como referencia
+        text_processing_result = chatgpt.process_text_input(answer if answer else "test", LAST_DETECTED_LANGUAGE)
         detected_language = text_processing_result.get('detected_language', 'en')
+        print(f"Text processing result: {text_processing_result}")
+        print(f"Detected language: {detected_language}")
+        
+        # Actualizar idioma global
+        LAST_DETECTED_LANGUAGE = detected_language
+        print(f"Updated LAST_DETECTED_LANGUAGE to: {LAST_DETECTED_LANGUAGE}")
 
-        # Mensajes base en inglés
         BASE_MESSAGES = {
             'ask_preference': "Would you like to include experts with supply chain experience?",
             'confirmed_yes': "Perfect! I will include experts with supply chain experience in the search.",
@@ -1142,52 +1439,67 @@ def supply_chain_experience():
 
         # Si answer está vacío, solo enviar la pregunta inicial
         if not answer:
+            print("\n=== Initial Question Generation ===")
             initial_question = BASE_MESSAGES['ask_preference']
-            # Traducir la pregunta al idioma detectado
             translated_question = chatgpt.translate_message(initial_question, detected_language)
+            print(f"Initial question: {initial_question}")
+            print(f"Translated question: {translated_question}")
             return jsonify({
                 'success': True,
                 'message': translated_question,
                 'detected_language': detected_language
             })
 
-        # Si hay una respuesta, procesarla
+        print("\n=== Intention Processing ===")
         intention_result = chatgpt.extract_intention(answer)
         intention = intention_result.get('intention') if intention_result.get('success') else None
+        print(f"Intention result: {intention_result}")
+        print(f"Extracted intention: {intention}")
 
-        # Procesar la respuesta basada en la intención extraída
+        print("\n=== Response Generation ===")
         if intention == 'yes':
+            print("Processing positive response")
             base_message = BASE_MESSAGES['confirmed_yes']
             supply_chain_required = True
         elif intention == 'no':
+            print("Processing negative response")
             base_message = BASE_MESSAGES['confirmed_no']
             supply_chain_required = False
         else:
-            # Traducir mensaje de error de validación
+            print("Processing invalid response")
             error_message = chatgpt.translate_message(BASE_MESSAGES['invalid_response'], detected_language)
+            print(f"Translated error: {error_message}")
             return jsonify({
                 'success': False,
                 'message': error_message,
                 'detected_language': detected_language
             }), 400
 
-        # Traducir mensaje de respuesta
+        print("\n=== Message Translation ===")
         response_message = chatgpt.translate_message(base_message, detected_language)
+        print(f"Base message: {base_message}")
+        print(f"Translated message: {response_message}")
 
-        return jsonify({
+        result = {
             'success': True,
             'message': response_message,
             'detected_language': detected_language,
             'supply_chain_required': supply_chain_required,
             'answer_received': intention
-        })
+        }
+
+        print("\n=== Final Response ===")
+        print(f"Sending response: {result}")
+        return jsonify(result)
 
     except Exception as e:
+        print(f"\n=== Error Handling ===")
         print(f"Error in supply chain experience: {str(e)}")
         error_message = chatgpt.translate_message(
             BASE_MESSAGES['processing_error'],
             detected_language if 'detected_language' in locals() else 'en'
         )
+        print(f"Translated error message: {error_message}")
         return jsonify({
             'success': False,
             'message': error_message,
@@ -1213,15 +1525,29 @@ def supply_chain_experience():
 @app.route('/api/evaluation-questions', methods=['POST'])
 def evaluation_questions():
     try:
+        global LAST_DETECTED_LANGUAGE
+        print("\n=== Previous Language State ===")
+        print(f"Last detected language was: {LAST_DETECTED_LANGUAGE}")
+        
         data = request.json
-        answer = data.get('answer', '')  # Obtener answer con valor por defecto vacío
+        print(f"Received data: {data}")
+        
+        answer = data.get('answer', '')
+        print(f"Extracted answer: {answer}")
+        
         chatgpt = ChatGPTHelper()
         
-        # Detectar el idioma
-        text_processing_result = chatgpt.process_text_input(answer if answer else "test")
+        print("\n=== Language Processing ===")
+        # Usar el idioma global como referencia
+        text_processing_result = chatgpt.process_text_input(answer if answer else "test", LAST_DETECTED_LANGUAGE)
         detected_language = text_processing_result.get('detected_language', 'en')
+        print(f"Text processing result: {text_processing_result}")
+        print(f"Detected language: {detected_language}")
+        
+        # Actualizar idioma global
+        LAST_DETECTED_LANGUAGE = detected_language
+        print(f"Updated LAST_DETECTED_LANGUAGE to: {LAST_DETECTED_LANGUAGE}")
 
-        # Mensajes base en inglés
         BASE_MESSAGES = {
             'ask_preference': "Would you like to add evaluation questions for the project?",
             'confirmed_yes': "Excellent! Please provide your evaluation questions for the project.",
@@ -1232,52 +1558,67 @@ def evaluation_questions():
 
         # Si answer está vacío, solo enviar la pregunta inicial
         if not answer:
+            print("\n=== Initial Question Generation ===")
             initial_question = BASE_MESSAGES['ask_preference']
-            # Traducir la pregunta al idioma detectado
             translated_question = chatgpt.translate_message(initial_question, detected_language)
+            print(f"Initial question: {initial_question}")
+            print(f"Translated question: {translated_question}")
             return jsonify({
                 'success': True,
                 'message': translated_question,
                 'detected_language': detected_language
             })
 
-        # Si hay una respuesta, procesarla
+        print("\n=== Intention Processing ===")
         intention_result = chatgpt.extract_intention(answer)
         intention = intention_result.get('intention') if intention_result.get('success') else None
+        print(f"Intention result: {intention_result}")
+        print(f"Extracted intention: {intention}")
 
-        # Procesar la respuesta basada en la intención extraída
+        print("\n=== Response Generation ===")
         if intention == 'yes':
+            print("Processing positive response")
             base_message = BASE_MESSAGES['confirmed_yes']
             evaluation_required = True
         elif intention == 'no':
+            print("Processing negative response")
             base_message = BASE_MESSAGES['confirmed_no']
             evaluation_required = False
         else:
-            # Traducir mensaje de error de validación
+            print("Processing invalid response")
             error_message = chatgpt.translate_message(BASE_MESSAGES['invalid_response'], detected_language)
+            print(f"Translated error: {error_message}")
             return jsonify({
                 'success': False,
                 'message': error_message,
                 'detected_language': detected_language
             }), 400
 
-        # Traducir mensaje de respuesta
+        print("\n=== Message Translation ===")
         response_message = chatgpt.translate_message(base_message, detected_language)
+        print(f"Base message: {base_message}")
+        print(f"Translated message: {response_message}")
 
-        return jsonify({
+        result = {
             'success': True,
             'message': response_message,
             'detected_language': detected_language,
             'evaluation_required': evaluation_required,
             'answer_received': intention
-        })
+        }
+
+        print("\n=== Final Response ===")
+        print(f"Sending response: {result}")
+        return jsonify(result)
 
     except Exception as e:
+        print(f"\n=== Error Handling ===")
         print(f"Error in evaluation questions: {str(e)}")
         error_message = chatgpt.translate_message(
             BASE_MESSAGES['processing_error'],
             detected_language if 'detected_language' in locals() else 'en'
         )
+        print(f"Translated error message: {error_message}")
         return jsonify({
             'success': False,
             'message': error_message,
@@ -1289,16 +1630,18 @@ def evaluation_questions():
 
 
 
-
-
-
-
-##################################################
 @app.route('/api/evaluation-questions-sections', methods=['POST'])
 def evaluation_questions_sections():
     try:
+        global LAST_DETECTED_LANGUAGE
+        print("\n=== Previous Language State ===")
+        print(f"Last detected language was: {LAST_DETECTED_LANGUAGE}")
+        
         data = request.json
+        print(f"Received data: {data}")
+        
         if 'sections' not in data:
+            print("Error: Missing sections")
             base_error = 'Sections are required'
             return jsonify({
                 'success': False,
@@ -1306,30 +1649,43 @@ def evaluation_questions_sections():
             }), 400
 
         chatgpt = ChatGPTHelper()
-        detected_language = data.get('language', 'en')
+        detected_language = LAST_DETECTED_LANGUAGE if LAST_DETECTED_LANGUAGE else data.get('language', 'en')
+        
+        # Actualizar idioma global
+        LAST_DETECTED_LANGUAGE = detected_language
+        print(f"Using language: {detected_language}")
+        print(f"Updated LAST_DETECTED_LANGUAGE to: {LAST_DETECTED_LANGUAGE}")
 
-        # Mensajes base en inglés
         BASE_MESSAGES = {
             'request_questions': "Please provide evaluation questions for the {section} section.",
             'all_completed': "All evaluation questions have been collected successfully.",
             'processing_error': "An error occurred while processing your request."
         }
 
-        # Solo procesar las secciones que el cliente envía
+        print("\n=== Sections Processing ===")
         sections = data['sections']
         questions = data.get('questions', {})
+        print(f"Received sections: {sections}")
+        print(f"Existing questions: {questions}")
 
-        # Encontrar secciones que faltan
         missing_sections = [section for section in sections if section not in questions]
+        print(f"Missing sections: {missing_sections}")
 
         if missing_sections:
+            print("\n=== Processing Pending Sections ===")
             current_section = missing_sections[0]
-            # Traducir el nombre de la sección también
+            print(f"Current section to process: {current_section}")
+            
+            print("\n=== Section Translation ===")
             translated_section = chatgpt.translate_message(current_section, detected_language)
+            print(f"Translated section: {translated_section}")
+            
             base_message = BASE_MESSAGES['request_questions'].format(section=translated_section)
             response_message = chatgpt.translate_message(base_message, detected_language)
+            print(f"Base message: {base_message}")
+            print(f"Translated message: {response_message}")
 
-            return jsonify({
+            result = {
                 'success': True,
                 'status': 'pending',
                 'message': response_message,
@@ -1338,31 +1694,40 @@ def evaluation_questions_sections():
                 'remaining_sections': missing_sections[1:],
                 'completed_sections': list(questions.keys()),
                 'detected_language': detected_language
-            })
+            }
         else:
+            print("\n=== Processing Completed Sections ===")
             base_message = BASE_MESSAGES['all_completed']
             response_message = chatgpt.translate_message(base_message, detected_language)
+            print(f"Completion message: {response_message}")
 
-            # Traducir las secciones completadas
+            print("\n=== Translating Completed Sections ===")
             translated_questions = {}
             for section, questions_list in questions.items():
                 translated_section = chatgpt.translate_message(section, detected_language)
                 translated_questions[translated_section] = questions_list
+                print(f"Translated section '{section}' to '{translated_section}'")
 
-            return jsonify({
+            result = {
                 'success': True,
                 'status': 'completed',
                 'message': response_message,
                 'sections_with_questions': translated_questions,
                 'detected_language': detected_language
-            })
+            }
+
+        print("\n=== Final Response ===")
+        print(f"Sending response: {result}")
+        return jsonify(result)
 
     except Exception as e:
+        print(f"\n=== Error Handling ===")
         print(f"Error in evaluation sections: {str(e)}")
         error_message = chatgpt.translate_message(
             BASE_MESSAGES['processing_error'],
             detected_language if 'detected_language' in locals() else 'en'
         )
+        print(f"Translated error message: {error_message}")
         return jsonify({
             'success': False,
             'message': error_message,
@@ -1371,12 +1736,13 @@ def evaluation_questions_sections():
 
 
 
-
-
-
 @app.route('/api/industry-experts', methods=['POST'])
 def industry_experts():
     try:
+        global LAST_DETECTED_LANGUAGE
+        print("\n=== Previous Language State ===")
+        print(f"Last detected language was: {LAST_DETECTED_LANGUAGE}")
+
         data = request.json
         print(f"Received request data: {data}")
         print(f"ClientPerspective type: {type(data.get('clientPerspective'))}")
@@ -1384,8 +1750,12 @@ def industry_experts():
         
         # Inicializar ChatGPTHelper y configurar idioma
         chatgpt = ChatGPTHelper()
-        detected_language = data.get('language', 'en')
+        detected_language = LAST_DETECTED_LANGUAGE if LAST_DETECTED_LANGUAGE else data.get('language', 'en')
+        
+        # Actualizar idioma global
+        LAST_DETECTED_LANGUAGE = detected_language
         print("1. Initial language detection:", detected_language)
+        print(f"Updated LAST_DETECTED_LANGUAGE to: {LAST_DETECTED_LANGUAGE}")
 
         # Mensajes base en inglés
         BASE_MESSAGES = {
@@ -1581,19 +1951,34 @@ def industry_experts():
 @app.route('/api/select-experts', methods=['POST'])
 def select_experts():
     try:
+        global LAST_DETECTED_LANGUAGE
+        print("\n=== Previous Language State ===")
+        print(f"Last detected language was: {LAST_DETECTED_LANGUAGE}")
+
         data = request.json
+        print("\n=== Received Data ===")
+        print(f"Received data: {data}")
+        
         selected_experts = data.get('selected_experts')
         all_experts_data = data.get('all_experts_data')
         evaluation_questions = data.get('evaluation_questions', {})
         
         chatgpt = ChatGPTHelper()
 
+        print("\n=== Language Processing ===")
         # Detectar idioma del nombre del experto si existe
         if selected_experts and len(selected_experts) > 0:
-            text_processing_result = chatgpt.process_text_input(selected_experts[0])
+            text_processing_result = chatgpt.process_text_input(selected_experts[0], LAST_DETECTED_LANGUAGE)
             detected_language = text_processing_result.get('detected_language', 'en')
+            print(f"Text processing result: {text_processing_result}")
+            print(f"Detected language: {detected_language}")
+            
+            # Actualizar idioma global
+            LAST_DETECTED_LANGUAGE = detected_language
+            print(f"Updated LAST_DETECTED_LANGUAGE to: {LAST_DETECTED_LANGUAGE}")
         else:
             detected_language = data.get('all_experts_data', {}).get('detected_language', 'en')
+            print(f"Using inherited language: {detected_language}")
 
         # Procesar el nombre del experto con ChatGPT primero
         if selected_experts and len(selected_experts) > 0:
@@ -1678,10 +2063,13 @@ def select_experts():
             }), 404
 
     except Exception as e:
+        print(f"\n=== Error Handling ===")
+        print(f"Error in select experts: {str(e)}")
         error_message = chatgpt.translate_message(
             BASE_MESSAGES['processing_error'],
             detected_language if 'detected_language' in locals() else 'en'
         )
+        print(f"Translated error message: {error_message}")
         return jsonify({
             'success': False,
             'message': error_message,

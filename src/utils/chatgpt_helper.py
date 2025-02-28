@@ -119,24 +119,31 @@ class ChatGPTHelper:
             return message  # Retorna el mensaje original si hay error
             
 
-
-    def process_text_input(self, text: str) -> Dict:
+    def process_text_input(self, text: str, previous_language: str = None) -> Dict:
         try:
+            context_info = f"Previous detected language: {previous_language}" if previous_language else "No previous language context"
+            
             messages = [
                 {
                     "role": "system",
-                    "content": """You are a specialized language detector for multilingual content.
+                    "content": f"""You are a specialized language detector for multilingual content.
+                    CONTEXT INFORMATION: {context_info}
+
                     Your tasks:
                     1. Detect the language and return ONLY the precise ISO code (e.g., fr-FR, es-ES, it-IT, en-US, pt-BR)
-                    2. PRIORITY RULES:
+                    
+                    2. IMPORTANT CONTEXT RULES:
+                    - If the text is ambiguous, return the previous language
+                    - If the text is very short (1 or 2 words), return the previous language
+                    - If the text only contains proper names, return the previous language
+                    - If the text only contains company names, return the previous language
+                    - If the text only contains country names, return the previous language
+                    - Only override previous language if the text clearly belongs to a different language
+                    
+                    3. PRIORITY RULES:
                     - Always prioritize the sentence structure and context over proper names
                     - Ignore proper names when they conflict with the main text language
                     - Focus on grammatical structure and common words
-                    
-                    3. For short texts and names:
-                    - Ignore email addresses when detecting language
-                    - Focus on the actual text content
-                    - Consider common phrases and words
                     - When finding proper names, prioritize the surrounding text
 
                     4. YES/NO REFERENCE TABLE (use for language detection):
@@ -167,24 +174,31 @@ class ChatGPTHelper:
                     Hebrew (he-IL): כן (ken), בטח (betach), לא (lo), אין (ein)
                     Czech (cs-CZ): ano, jo, ne, nikoliv
                     Hungarian (hu-HU): igen, ja, nem, dehogy
+
+                    IMPORTANT: 
+                    - Return ONLY the language code
+                    - For ambiguous cases, return the previous language
+                    - For very short texts, return the previous language
+                    - For proper names only, return the previous language
                     
-                    IMPORTANT: Return ONLY the language code, nothing else.
+                    Examples with context:
+                    Previous language fr-FR:
+                    - "Microsoft" → fr-FR (company name only)
+                    - "España" → fr-FR (country name only)
+                    - "Pierre" → fr-FR (proper name only)
+                    - "oui" → fr-FR (short response)
+                    - "John Smith" → fr-FR (proper names only)
+                    - "Bonjour Pierre" → fr-FR (clear French)
+                    - "Hello Pierre" → en-US (clear English despite name)
                     
-                    Examples:
-                    - "I want to contact María González" → en-US (prioritize "I want to contact" over the name)
-                    - "Ceci est mon email test@test.com" → fr-FR
-                    - "Quiero contactar a María González" → es-ES
-                    - "Je voudrais contacter María González" → fr-FR
-                    - "This is my email" → en-US
-                    - "Questo è il mio email" → it-IT
-                    - "はい、お願いします" → ja-JP
-                    - "Oui, bien sûr" → fr-FR
-                    - "No, gracias" → es-ES
-                    - "Yes, please" → en-US
-                    - "네, 감사합니다" → ko-KR
-                    - "Да, спасибо" → ru-RU
-                    - "نعم، شكراً" → ar-SA
-                    - "כן, תודה" → he-IL"""
+                    Previous language es-ES:
+                    - "Google" → es-ES (company name only)
+                    - "Francia" → es-ES (country name only)
+                    - "María" → es-ES (proper name only)
+                    - "sí" → es-ES (short response)
+                    - "Juan García" → es-ES (proper names only)
+                    - "Hola María" → es-ES (clear Spanish)
+                    - "Hello María" → en-US (clear English despite name)"""
                 },
                 {
                     "role": "user",
@@ -205,27 +219,17 @@ class ChatGPTHelper:
                 "success": True,
                 "text": text,
                 "detected_language": detected_language,
-                "is_email": '@' in text
+                "is_email": '@' in text,
+                "previous_language": previous_language
             }
 
         except Exception as e:
             logger.error(f"Error detecting language: {str(e)}")
             return {
                 "success": False,
-                "detected_language": "en-US",
+                "detected_language": previous_language if previous_language else "en-US",
                 "error": str(e)
             }
-
-    
-
-
-
-
-
-
-
-
-
 
 
 
