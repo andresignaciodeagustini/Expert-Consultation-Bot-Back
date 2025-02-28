@@ -120,93 +120,33 @@ class ChatGPTHelper:
             
 
 
-    def process_text_input(self, text: str, previous_language: str = None) -> Dict:
+    def process_text_input(self, text: str) -> Dict:
         try:
-            context_info = f"Previous detected language: {previous_language}" if previous_language else "No previous language context"
-            
             messages = [
                 {
                     "role": "system",
-                    "content": f"""You are a specialized language detector for multilingual content.
-                    CONTEXT INFORMATION: {context_info}
-
+                    "content": """You are a specialized language detector for multilingual content.
                     Your tasks:
                     1. Detect the language and return ONLY the precise ISO code (e.g., fr-FR, es-ES, it-IT, en-US, pt-BR)
-                    
-                    2. CONTEXT RULES:
-                    - For single word responses (especially "yes"/"no"), prioritize the previous language context
-                    - Only override previous language if the response is clearly from a different language
-                    - For ambiguous short responses, maintain the previous language context
-                    Example: if previous language is es-ES and user says "no", return es-ES
-                    
+                    2. If you cannot determine the language with certainty, return 'en-US'
                     3. PRIORITY RULES:
                     - Always prioritize the sentence structure and context over proper names
                     - Ignore proper names when they conflict with the main text language
                     - Focus on grammatical structure and common words
-                    - When finding proper names, prioritize the surrounding text
+                    - If text is ambiguous or unclear, return 'en-US'
                     
-                    4. For short texts and names:
-                    - Ignore email addresses when detecting language
-                    - Focus on the actual text content
-                    - Consider common phrases and words
-                    - When finding proper names, prioritize the surrounding text
-
-                    5. YES/NO REFERENCE TABLE with CONTEXT:
-                    English (en-US): yes, yeah, yep, sure, certainly, no, nope, nah
-                    Spanish (es-ES): sí, si, claro, efectivamente, por supuesto, no, nop, para nada
-                    French (fr-FR): oui, ouais, bien sûr, certainement, non, pas du tout
-                    Italian (it-IT): sì, si, certo, certamente, esatto, no, non
-                    German (de-DE): ja, jawohl, doch, natürlich, selbstverständlich, nein, nö
-                    Portuguese (pt-BR/pt-PT): sim, claro, certamente, não, nao
-                    Japanese (ja-JP): はい (hai), うん (un), ええ (ee), そう (sou), いいえ (iie), いや (iya), ちがう (chigau)
-                    Chinese Simplified (zh-CN): 是的 (shì de), 好的 (hǎo de), 对 (duì), 不是 (bú shì), 不 (bù), 没有 (méi yǒu)
-                    Chinese Traditional (zh-TW): 是的, 好的, 對, 不是, 不, 沒有
-                    Russian (ru-RU): да (da), конечно (konechno), разумеется, нет (net), нету (netu)
-                    Arabic (ar-SA): نعم (na'am), أجل (ajal), طبعا (tab'an), لا (la), كلا (kalla)
-                    Korean (ko-KR): 네 (ne), 예 (ye), 그렇습니다 (geureoseumnida), 아니요 (aniyo), 아니 (ani)
-                    Dutch (nl-NL): ja, jawel, zeker, natuurlijk, nee, neen
-                    Swedish (sv-SE): ja, jovisst, absolut, visst, nej, inte
-                    Norwegian (no-NO): ja, jo, jepp, nei, neppe
-                    Danish (da-DK): ja, jo, jep, nej, næ
-                    Finnish (fi-FI): kyllä, joo, juu, ei, eikä
-                    Polish (pl-PL): tak, no tak, owszem, nie, nigdy
-                    Turkish (tr-TR): evet, tabii, elbette, hayır, yok
-                    Greek (el-GR): ναι (nai), μάλιστα (malista), όχι (ochi), μπα (ba)
-                    Hindi (hi-IN): हाँ (haan), जी हाँ (ji haan), नहीं (nahin), बिल्कुल नहीं (bilkul nahin)
-                    Vietnamese (vi-VN): có, vâng, đúng, không, không phải
-                    Thai (th-TH): ใช่ (chai), ครับ/ค่ะ (khrap/kha), ไม่ (mai), ไม่ใช่ (mai chai)
-                    Indonesian (id-ID): ya, iya, betul, tidak, nggak
-                    Hebrew (he-IL): כן (ken), בטח (betach), לא (lo), אין (ein)
-                    Czech (cs-CZ): ano, jo, ne, nikoliv
-                    Hungarian (hu-HU): igen, ja, nem, dehogy
+                    [... resto del contenido igual ...]
 
                     IMPORTANT: 
-                    - Return ONLY the language code
-                    - For short answers like "no", "si", "ok":
-                    * If there's previous language context, prioritize it
-                    * If no context, analyze surrounding words or default to most likely language
+                    - Return ONLY the language code, nothing else
+                    - If language cannot be determined with confidence, return 'en-US'
+                    - If text is too short or ambiguous, return 'en-US'
                     
-                    Examples with context:
-                    - Previous: es-ES | Input: "no" → es-ES
-                    - Previous: it-IT | Input: "no" → it-IT
-                    - Previous: es-ES | Input: "yes" → en-US (clearly English, override context)
-                    - Previous: fr-FR | Input: "I want to contact María González" → en-US (full sentence overrides context)
-                    - Previous: es-ES | Input: "gracias" → es-ES
-                    - Previous: None | Input: "no" → analyze as new input
-                    - Previous: es-ES | Input: "oui" → fr-FR (clearly French, override context)
-                    - Previous: en-US | Input: "I want to contact María González" → en-US (prioritize "I want to contact" over the name)
-                    - Previous: fr-FR | Input: "Ceci est mon email test@test.com" → fr-FR
-                    - Previous: es-ES | Input: "Quiero contactar a María González" → es-ES
-                    - Previous: None | Input: "This is my email" → en-US
-                    - Previous: it-IT | Input: "Questo è il mio email" → it-IT
-                    - Previous: ja-JP | Input: "はい、お願いします" → ja-JP
-                    - Previous: None | Input: "Oui, bien sûr" → fr-FR
-                    - Previous: es-ES | Input: "No, gracias" → es-ES
-                    - Previous: en-US | Input: "Yes, please" → en-US
-                    - Previous: ko-KR | Input: "네, 감사합니다" → ko-KR
-                    - Previous: ru-RU | Input: "Да, спасибо" → ru-RU
-                    - Previous: ar-SA | Input: "نعم، شكراً" → ar-SA
-                    - Previous: he-IL | Input: "כן, תודה" → he-IL"""
+                    Examples:
+                    [... mismos ejemplos ...]
+                    - "123456" → en-US (cannot determine language)
+                    - "..." → en-US (cannot determine language)
+                    - "xyz" → en-US (cannot determine language)"""
                 },
                 {
                     "role": "user",
@@ -223,12 +163,15 @@ class ChatGPTHelper:
             
             detected_language = detect_response.choices[0].message.content.strip()
             
+            # Si la respuesta está vacía o no es un código de idioma válido, usar en-US
+            if not detected_language or len(detected_language) < 5:
+                detected_language = "en-US"
+            
             return {
                 "success": True,
                 "text": text,
                 "detected_language": detected_language,
-                "is_email": '@' in text,
-                "previous_language": previous_language  # Incluir el contexto en la respuesta
+                "is_email": '@' in text
             }
 
         except Exception as e:
@@ -236,12 +179,8 @@ class ChatGPTHelper:
             return {
                 "success": False,
                 "detected_language": "en-US",
-                "error": str(e),
-                "previous_language": previous_language
+                "error": str(e)
             }
-
-
-
 
 
 
@@ -391,108 +330,105 @@ class ChatGPTHelper:
         
 
 
-
-
     def get_companies_suggestions(
-        self,
-        sector: str,
-        geography: str,
-        temperature: float = 0.7
-    ) -> Dict:
-        try:
-            logger.info(f"Generating companies for sector: {sector}, geography: {geography}")
+            self,
+            sector: str,
+            geography: str,
+            temperature: float = 0.7
+        ) -> Dict:
+            try:
+                logger.info(f"Generating companies for sector: {sector}, geography: {geography}")
 
-            # Modificar el prompt para ser más específico con la ubicación
-            messages = [
-                {
-                    "role": "system",
-                    "content": """You are a professional business analyst that provides accurate lists of companies.
-                    When given a sector and location, provide real companies that operate in that specific location.
-                    If the location is not specific enough or invalid, indicate that in your response."""
-                },
-                {
+                # Modificar el prompt para ser más específico con la ubicación
+                messages = [
+                    {
+                        "role": "system",
+                        "content": """You are a professional business analyst that provides accurate lists of companies.
+                        When given a sector and location, provide real companies that operate in that specific location.
+                        If the location is not specific enough or invalid, indicate that in your response."""
+                    },
+                    {
+                        
                     "role": "user",
-                    "content": f"List exactly 20 real companies in the {sector} sector that have significant operations or presence in {geography}. If {geography} is not a valid or specific location, please indicate that. Only provide the company names separated by commas, or indicate if the location is invalid."
+                    "content": f"List exactly 20 real companies in the {sector} sector that have significant operations or presence in {geography}. Provide ONLY the company names separated by commas, without any numbering or enumeration. If     {geography} is not a valid or specific location, please indicate that."
+                    }
+                ]
+
+                response = self.client.chat.completions.create(
+                    model="gpt-4",
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=250
+                )
+
+                content = response.choices[0].message.content
+                if content is None or "invalid" in content.lower() or "didn't specify" in content.lower():
+                    logger.info("Invalid or unspecified location")
+                    error_message = f"Please provide a more specific location for {sector} companies."
+                    return {
+                        "success": False,
+                        "error": error_message,
+                        "content": [],
+                        "contentId": str(uuid.uuid4()),
+                        "messages": {
+                            "error": error_message
+                        }
+                    }
+
+                companies_text = content.strip()
+                if not companies_text:
+                    logger.info("Received empty response from API")
+                    error_message = self.get_bot_response('error_no_companies')
+                    return {
+                        "success": True,
+                        "content": [],
+                        "contentId": str(uuid.uuid4()),
+                        "messages": {
+                            "error": error_message
+                        }
+                    }
+
+                companies = [
+                    company.strip()
+                    for company in companies_text.split(',')
+                    if company.strip() and not company.strip().isspace()
+                ]
+
+                if len(companies) < 20:
+                    logger.warning(f"Received only {len(companies)} companies, requesting more")
+                    return self.get_companies_suggestions(sector, geography, temperature)
+
+                logger.info(f"Successfully generated {len(companies)} companies")
+
+                translated_messages = {
+                    "title": self.translate_message(
+                        f"Found {sector} companies in {geography}",
+                        self.current_language
+                    ),
+                    "companies_found": self.get_bot_response("companies_found"),
+                    "from_database": self.get_bot_response("from_database"),
+                    "additional_suggestions": self.get_bot_response("additional_suggestions"),
+                    "search_more": self.get_bot_response("search_more")
                 }
-            ]
 
-            response = self.client.chat.completions.create(
-                model="gpt-4",
-                messages=messages,
-                temperature=temperature,
-                max_tokens=250
-            )
+                return {
+                    "success": True,
+                    "content": companies[:20],
+                    "contentId": str(uuid.uuid4()),
+                    "messages": translated_messages,
+                    "detected_language": self.current_language
+                }
 
-            content = response.choices[0].message.content
-            if content is None or "invalid" in content.lower() or "didn't specify" in content.lower():
-                logger.info("Invalid or unspecified location")
-                error_message = f"Please provide a more specific location for {sector} companies."
+            except Exception as e:
+                logger.error(f"Error generating companies: {str(e)}")
+                error_message = self.get_bot_response('error_general')
                 return {
                     "success": False,
                     "error": error_message,
-                    "content": [],
-                    "contentId": str(uuid.uuid4()),
-                    "messages": {
-                        "error": error_message
-                    }
+                    "contentId": None,
+                    "detected_language": self.current_language
                 }
-
-            companies_text = content.strip()
-            if not companies_text:
-                logger.info("Received empty response from API")
-                error_message = self.get_bot_response('error_no_companies')
-                return {
-                    "success": True,
-                    "content": [],
-                    "contentId": str(uuid.uuid4()),
-                    "messages": {
-                        "error": error_message
-                    }
-                }
-
-            companies = [
-                company.strip()
-                for company in companies_text.split(',')
-                if company.strip() and not company.strip().isspace()
-            ]
-
-            if len(companies) < 20:
-                logger.warning(f"Received only {len(companies)} companies, requesting more")
-                return self.get_companies_suggestions(sector, geography, temperature)
-
-            logger.info(f"Successfully generated {len(companies)} companies")
-
-            translated_messages = {
-                "title": self.translate_message(
-                    f"Found {sector} companies in {geography}",
-                    self.current_language
-                ),
-                "companies_found": self.get_bot_response("companies_found"),
-                "from_database": self.get_bot_response("from_database"),
-                "additional_suggestions": self.get_bot_response("additional_suggestions"),
-                "search_more": self.get_bot_response("search_more")
-            }
-
-            return {
-                "success": True,
-                "content": companies[:20],
-                "contentId": str(uuid.uuid4()),
-                "messages": translated_messages,
-                "detected_language": self.current_language
-            }
-
-        except Exception as e:
-            logger.error(f"Error generating companies: {str(e)}")
-            error_message = self.get_bot_response('error_general')
-            return {
-                "success": False,
-                "error": error_message,
-                "contentId": None,
-                "detected_language": self.current_language
-            }
-        
-
-
+            
 
 
 
