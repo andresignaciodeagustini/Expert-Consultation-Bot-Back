@@ -888,10 +888,11 @@ class ChatGPTHelper:
 
             try:
                 messages = [
-                    {
+                  {
                         "role": "system",
-                        "content": """You are an AI specialized in identifying professional sectors.
-                        Return ONLY ONE WORD representing the sector from this list:
+                        "content": """You are an AI specialized in identifying professional sectors from any text input, including short phrases and multiple languages.
+
+                        Return ONLY ONE WORD from this list:
                         - Business
                         - Technology
                         - Healthcare
@@ -902,11 +903,26 @@ class ChatGPTHelper:
                         - Marketing
                         - Software
                         - Medical
-                        
+
+                        Common variations in multiple languages:
+                        Technology: tecnología, tech, IT, informatique, technologie, tecnologia
+                        Healthcare: salud, santé, gesundheit, saúde, sanidad
+                        Finance: finanzas, financial, financiero, finance, finanças
+                        Business: negocios, business, entreprise, negócios, empresa
+                        Education: educación, education, éducation, educação, ensino
+                        Creative: creativo, créatif, criativo, diseño, design
+                        Legal: legal, jurídico, droit, direito
+                        Marketing: marketing, mercadeo, márqueting, mercadotecnia
+                        Software: software, logiciel, programación, desenvolvimento
+                        Medical: médico, medical, médical, medicina
+
                         Rules:
-                        - Return ONLY ONE WORD, no additional text
-                        - Convert related terms (e.g., 'salud' → 'Healthcare', 'tecnología' → 'Technology')
-                        - If no sector is identified, return 'Unknown'
+                        - Return ONLY ONE WORD from the approved list
+                        - Understand short phrases like 'me interesa tecnología' → 'Technology'
+                        - Convert related terms in any language to English sector name
+                        - Handle informal expressions like 'quiero finanzas' → 'Finance'
+                        - If no sector is clearly identified, return 'Unknown'
+                        - Ignore additional context and focus on sector identification
                         """
                     },
                     {

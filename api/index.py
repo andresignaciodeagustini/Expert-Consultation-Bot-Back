@@ -180,6 +180,162 @@ def refresh_token():
 
 
 
+@app.route('/api/welcome-message', methods=['GET'])
+def get_welcome_message():
+    try:
+        global LAST_DETECTED_LANGUAGE
+        print("\n=== Welcome Message Endpoint Started ===")
+        print(f"Previous detected language: {LAST_DETECTED_LANGUAGE}")
+        
+        # Primera opción: ipapi.co
+        try:
+            print("Attempting primary IP detection (ipapi.co)...")
+            response = requests.get('https://ipapi.co/json/', timeout=5)
+            data = response.json()
+            
+            if 'error' in data:
+                raise Exception(f"ipapi.co error: {data.get('reason', 'Unknown error')}")
+                
+            country_code = data.get('country_code', 'US')
+            print(f"Successfully detected country from ipapi.co: {country_code}")
+            
+        except Exception as primary_error:
+            print(f"Primary IP detection failed: {str(primary_error)}")
+            
+            # Segunda opción: ip-api.com
+            try:
+                print("Attempting secondary IP detection (ip-api.com)...")
+                response = requests.get('http://ip-api.com/json/', timeout=5)
+                data = response.json()
+                
+                if data.get('status') == 'success':
+                    country_code = data.get('countryCode', 'US')
+                    print(f"Successfully detected country from ip-api.com: {country_code}")
+                else:
+                    raise Exception("ip-api.com detection failed")
+                    
+            except Exception as secondary_error:
+                print(f"Secondary IP detection failed: {str(secondary_error)}")
+                
+                # Tercera opción: ipinfo.io
+                try:
+                    print("Attempting tertiary IP detection (ipinfo.io)...")
+                    token = os.getenv('IPINFO_TOKEN', 'fallback_token')
+                    response = requests.get(f'https://ipinfo.io/json?token={token}', timeout=5)
+                    data = response.json()
+                    country_code = data.get('country', 'US')
+                    print(f"Successfully detected country from ipinfo.io: {country_code}")
+                    
+                except Exception as tertiary_error:
+                    print(f"All IP detection methods failed. Using default US")
+                    country_code = 'US'
+
+        print(f"Final detected Country Code: {country_code}")
+
+        # Mapeo extensivo de países a códigos de idioma
+        language_map = {
+            # Español (es)
+            'AR': 'es', 'BO': 'es', 'CL': 'es', 'CO': 'es', 'CR': 'es',
+            'CU': 'es', 'DO': 'es', 'EC': 'es', 'SV': 'es', 'GQ': 'es',
+            'GT': 'es', 'HN': 'es', 'MX': 'es', 'NI': 'es', 'PA': 'es',
+            'PY': 'es', 'PE': 'es', 'PR': 'es', 'ES': 'es', 'UY': 'es',
+            'VE': 'es',
+
+            # Inglés (en)
+            'US': 'en', 'GB': 'en', 'CA': 'en', 'AU': 'en', 'NZ': 'en',
+            'IE': 'en', 'ZA': 'en', 'JM': 'en', 'BZ': 'en', 'TT': 'en',
+            'GY': 'en', 'AG': 'en', 'BS': 'en', 'BB': 'en',
+
+            # Francés (fr)
+            'FR': 'fr', 'CA-FR': 'fr', 'BE': 'fr', 'CH': 'fr', 'MC': 'fr',
+            'LU': 'fr', 'SN': 'fr', 'CI': 'fr', 'ML': 'fr', 'BF': 'fr',
+            'NE': 'fr', 'TG': 'fr', 'BJ': 'fr', 'GA': 'fr', 'CG': 'fr',
+            'MG': 'fr', 'CM': 'fr', 'DZ': 'fr', 'TN': 'fr', 'MA': 'fr',
+
+            # [Resto del mapeo de idiomas igual...]
+        }
+
+        # Obtener el código de idioma correcto
+        target_language = language_map.get(country_code, 'en')
+        print(f"Mapped language code: {target_language}")
+
+        # Actualizar el idioma global
+        LAST_DETECTED_LANGUAGE = target_language
+        print(f"Updated LAST_DETECTED_LANGUAGE to: {LAST_DETECTED_LANGUAGE}")
+
+        # Mensajes de bienvenida base en inglés con el nombre de la compañía protegido
+        welcome_messages = {
+            "greeting": {
+                "text": "Welcome to Silverlight Research Expert Network! I'm here to help you find the perfect expert for your needs.",
+                "protected_terms": ["Silverlight Research Expert Network"]
+            },
+            "instruction": "To get started, please provide your email address."
+        }
+
+        chatgpt = ChatGPTHelper()
+        
+        # Si no es inglés, incluir ambas versiones
+        if target_language != 'en':
+            print(f"Translating messages to language: {target_language}")
+            translated_messages = {
+                "greeting": {
+                    "english": welcome_messages["greeting"]["text"],
+                    "translated": chatgpt.translate_message(
+                        f"Translate the following keeping 'Silverlight Research Expert Network' unchanged: {welcome_messages['greeting']['text']}",
+                        target_language
+                    )
+                },
+                "instruction": {
+                    "english": welcome_messages["instruction"],
+                    "translated": chatgpt.translate_message(welcome_messages["instruction"], target_language)
+                }
+            }
+        else:
+            print("English language detected, using English only")
+            translated_messages = {
+                "greeting": {
+                    "english": welcome_messages["greeting"]["text"]
+                },
+                "instruction": {
+                    "english": welcome_messages["instruction"]
+                }
+            }
+        
+        response_data = {
+            'success': True,
+            'detected_language': target_language,
+            'messages': translated_messages,
+            'country_code': country_code,
+            'is_english_speaking': target_language == 'en',
+            'detection_method': 'primary' if 'primary_error' not in locals() else 
+                              'secondary' if 'secondary_error' not in locals() else 
+                              'tertiary' if 'tertiary_error' not in locals() else 'default'
+        }
+        
+        print("\n=== Welcome Message Response ===")
+        print(f"Sending response: {response_data}")
+        
+        return jsonify(response_data)
+
+    except Exception as e:
+        print("\n=== Welcome Message Error ===")
+        print(f"Error type: {type(e)}")
+        print(f"Error details: {str(e)}")
+        print(f"Error location: {e.__traceback__.tb_lineno}")
+        
+        error_message = "Error generating welcome message"
+        if 'chatgpt' in locals():
+            error_message = chatgpt.translate_message(
+                error_message,
+                LAST_DETECTED_LANGUAGE if LAST_DETECTED_LANGUAGE else 'en'
+            )
+        
+        return jsonify({
+            'success': False,
+            'error': error_message,
+            'detected_language': 'en'
+        }), 500
+   
 
 
 
@@ -192,15 +348,7 @@ REGISTERED_TEST_EMAILS = [
     "测试@测试.com"      # Alemán
 ]
 def is_email_registered(email: str) -> bool:
-    """
-    Verifica si un email está en la lista de emails registrados
     
-    Args:
-        email (str): El email a verificar
-        
-    Returns:
-        bool: True si está registrado, False si no
-    """
     return email.lower() in [e.lower() for e in REGISTERED_TEST_EMAILS]
 
 @app.route('/api/ai/email/capture', methods=['POST'])
@@ -305,9 +453,6 @@ def capture_email():
 
 
 
-
-
-
 @app.route('/api/ai/name/capture', methods=['POST'])
 def capture_name():
     try:
@@ -328,7 +473,7 @@ def capture_name():
         chatgpt = ChatGPTHelper()
         
         # Obtener el idioma anterior del request
-        previous_language = data.get('language', 'en')
+        previous_language = LAST_DETECTED_LANGUAGE
         print(f"Language from request: {previous_language}")
         
         print("\n=== Language Processing ===")
