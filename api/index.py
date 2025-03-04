@@ -1,20 +1,22 @@
 import sys
 from pathlib import Path
 import os
+import re
 from dotenv import load_dotenv
-import sys
-from pathlib import Path
 from datetime import datetime 
-
-# Mover esta línea al inicio
-sys.path.append(str(Path(__file__).parent.parent))
-
-import os
-from dotenv import load_dotenv
 import requests
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from waitress import serve
+from werkzeug.utils import secure_filename  # Nueva importación
+from werkzeug.datastructures import FileStorage, MultiDict
+
+# Configuración de rutas del proyecto
+project_root = str(Path(__file__).parent.parent)
+if project_root not in sys.path:
+    sys.path.append(project_root)
+
+# Importaciones del proyecto después de configurar sys.path
 from src.handlers.phase1_handlers.email_handler import handle_email_capture
 from src.handlers.phase2_handlers.sector_handler import handle_sector_capture
 from src.handlers.phase2_handlers.geography_handler import handle_geography_capture
@@ -24,8 +26,8 @@ from src.services.external.zoho_services import ZohoService
 from src.utils.config import VALID_SECTORS
 from src.routes.ai.voiceRoutes import voice_routes
 
-
 LAST_DETECTED_LANGUAGE = None
+
 # Configuración inicial
 print("\n=== Environment Setup ===")
 current_dir = Path(__file__).parent.absolute()
@@ -63,20 +65,17 @@ if token:
 else:
     print("WARNING: No token found in .env file")
 
-sys.path.append(str(Path(__file__).parent.parent))
-
-
-
-
+# Inicialización de Flask
 app = Flask(__name__)
 
-# Configuración actualizada de CORS
+# Configuración de CORS
 CORS(app, resources={
     r"/*": {
         "origins": [
             "https://expert-consultation-bot-front.vercel.app",
             "https://expert-consultation-bot-front-isej4yvne.vercel.app",
             "http://localhost:5173",
+            "http://localhost:5174",
             "http://localhost:3000"
         ],
         "methods": ["GET", "POST", "OPTIONS"],
@@ -86,6 +85,7 @@ CORS(app, resources={
     }
 })
 
+# Registro de blueprints
 app.register_blueprint(voice_routes, url_prefix='/api/ai/voice')
 
 print("\n=== Initializing Services ===")
@@ -336,6 +336,8 @@ def get_welcome_message():
             'detected_language': 'en'
         }), 500
    
+
+
 
 
 
@@ -2256,298 +2258,26 @@ def select_experts():
 
 
 
-    #########################################################################3
-class ExpertSearch:
-    def __init__(self):
-        # Aquí podrías inicializar conexión a base de datos o configuraciones
-        self.experts_db = self._mock_experts_database()  # Por ahora usamos datos mock
-
-    def _mock_experts_database(self):
-        # Base de datos simulada de expertos
-        return [
-            {
-                "id": "exp001",
-                "name": "John Smith",
-                "sector": "Technology",
-                "region": "North America",
-                "current_company": "Tech Solutions Inc",
-                "previous_companies": ["Google", "Microsoft"],
-                "years_experience": 15,
-                "expertise_level": "senior",
-                "languages": ["english", "spanish"],
-                "availability": "flexible",
-                "specialties": ["cloud computing", "AI", "digital transformation"]
-            },
-            {
-                "id": "exp002",
-                "name": "Maria García",
-                "sector": "Technology",
-                "region": "Europe",
-                "current_company": "Digital Innovators",
-                "previous_companies": ["Amazon", "IBM"],
-                "years_experience": 10,
-                "expertise_level": "senior",
-                "languages": ["english", "spanish", "french"],
-                "availability": "part-time",
-                "specialties": ["cybersecurity", "blockchain"]
-            },
-            {
-                "id": "exp003",
-                "name": "David Chen",
-                "sector": "Finance",
-                "region": "Asia",
-                "current_company": "FinTech Solutions",
-                "previous_companies": ["JP Morgan", "Goldman Sachs"],
-                "years_experience": 12,
-                "expertise_level": "senior",
-                "languages": ["english", "mandarin"],
-                "availability": "flexible",
-                "specialties": ["investment banking", "risk management"]
-            }
-        ]
-
-    def find_experts(self, sector, region=None, target_companies=None, excluded_companies=None, preferences=None):
-        filtered_experts = []
-        
-        for expert in self.experts_db:
-            # Filtro por sector (obligatorio)
-            if expert['sector'].lower() != sector.lower():
-                continue
-
-            # Filtro por región
-            if region and expert['region'].lower() != region.lower():
-                continue
-
-            # Filtro por empresas objetivo
-            if target_companies:
-                companies_match = False
-                all_companies = [expert['current_company']] + expert['previous_companies']
-                for company in target_companies:
-                    if company in all_companies:
-                        companies_match = True
-                        break
-                if not companies_match:
-                    continue
-
-            # Filtro por empresas excluidas
-            if excluded_companies:
-                skip_expert = False
-                all_companies = [expert['current_company']] + expert['previous_companies']
-                for company in excluded_companies:
-                    if company in all_companies:
-                        skip_expert = True
-                        break
-                if skip_expert:
-                    continue
-
-            # Filtro por preferencias
-            if preferences:
-                if 'years_experience' in preferences:
-                    if expert['years_experience'] < preferences['years_experience']:
-                        continue
-                
-                if 'expertise_level' in preferences:
-                    if expert['expertise_level'] != preferences['expertise_level']:
-                        continue
-                
-                if 'languages' in preferences:
-                    if not any(lang in expert['languages'] for lang in preferences['languages']):
-                        continue
-                
-                if 'availability' in preferences:
-                    if expert['availability'] != preferences['availability']:
-                        continue
-
-            filtered_experts.append(expert)
-
-        return filtered_experts
-    
 
 
 
 
-
-
-
-@app.route('/api/experts/search', methods=['POST'])
-def search_experts():
-    try:
-        data = request.json
-        
-        # Validación de campos requeridos
-        if 'sector' not in data:
-            return jsonify({
-                'success': False,
-                'message': 'Sector is required'
-            }), 400
-
-        # Extraer parámetros de búsqueda
-        sector = data.get('sector')
-        region = data.get('region')
-        target_companies = data.get('target_companies', [])
-        excluded_companies = data.get('excluded_companies', [])
-        expert_preferences = data.get('expert_preferences', {})
-        
-        # Inicializar búsqueda de expertos
-        expert_search = ExpertSearch()
-        
-        # Aplicar filtros de búsqueda
-        experts = expert_search.find_experts(
-            sector=sector,
-            region=region,
-            target_companies=target_companies,
-            excluded_companies=excluded_companies,
-            preferences=expert_preferences
-        )
-
-        return jsonify({
-            'success': True,
-            'experts': experts,
-            'total_found': len(experts),
-            'filters_applied': {
-                'sector': sector,
-                'region': region,
-                'target_companies': target_companies,
-                'excluded_companies': excluded_companies,
-                'preferences': expert_preferences
-            }
-        })
-
-    except Exception as e:
-        print(f"Error in expert search: {str(e)}")
-        return jsonify({
-            'success': False,
-            'error': "An error occurred while searching for experts"
-        }), 500
-    
-
-
-
-
-
-""""
-
-def process_message_internal(data):
-    try:
-        print("\n=== Processing Message ===")
-        print("Data:", data)
-
-        location = data.get('message')
-        sector = data.get('sector')
-        detected_language = data.get('language') or chatgpt.detected_language_from_content(location)
-
-        if not location:
-            error_message = chatgpt.translate_message(
-                'Location cannot be empty',
-                detected_language
-            )
-            return jsonify({
-                'success': False,
-                'message': error_message
-            })
-
-        # Si no hay sector, solo procesar la región
-        if not sector:
-            region_result = chatgpt.identify_region(location)
-            if region_result['success']:
-                response_message = chatgpt.translate_message(
-                    f"He identificado la región como {region_result['region']}. Por favor, especifique el sector empresarial.",
-                    detected_language
-                )
-                return jsonify({
-                    'success': True,
-                    'region': region_result['region'],
-                    'message': response_message,
-                    'language': detected_language,
-                    'needsSector': True
-                })
-            else:
-                error_message = chatgpt.translate_message(
-                    "Por favor, proporciona una región válida (Norte América, Europa o Asia)",
-                    detected_language
-                )
-                return jsonify({
-                    'success': False,
-                    'message': error_message,
-                    'language': detected_language
-                })
-
-        # Si hay sector, procesar sector
-        sector_result = chatgpt.translate_sector(sector)
-        if sector_result.get('success') and sector_result.get('is_valid'):
-            translated_sector = sector_result['translated_sector']
-            region_result = chatgpt.identify_region(location)
-            
-            if region_result['success']:
-                zoho_companies = zoho_service.get_accounts_by_industry_and_region(
-                    industry=translated_sector,
-                    region=region_result['region']
-                )
-
-                companies_needed = 20 - len(zoho_companies)
-                chatgpt_suggestions = []
-
-                if companies_needed > 0:
-                    chatgpt_result = chatgpt.get_companies_suggestions(
-                        sector=translated_sector,
-                        geography=region_result['region']
-                    )
-                    if chatgpt_result['success']:
-                        chatgpt_suggestions = chatgpt_result['content'][:companies_needed]
-
-                response_message = chatgpt.translate_message(
-                    f"Has seleccionado el sector {sector_result['displayed_sector']}",
-                    detected_language
-                )
-
-                return jsonify({
-                    'success': True,
-                    'sector': translated_sector,
-                    'displayed_sector': sector_result['displayed_sector'],
-                    'message': response_message,
-                    'language': detected_language,
-                    'companies': {
-                        'zoho_companies': zoho_companies,
-                        'suggested_companies': [{'name': company} for company in chatgpt_suggestions]
-                    }
-                })
-
-        error_message = chatgpt.translate_message(
-            f"Sector no válido. Por favor, elija entre: {sector_result.get('available_sectors')}",
-            detected_language
-        )
-        return jsonify({
-            'success': False,
-            'message': error_message,
-            'language': detected_language
-        })
-
-    except Exception as e:
-        print(f"\n=== Error in process_message_internal ===")
-        print(f"Error type: {type(e).__name__}")
-        print(f"Error message: {str(e)}")
-        return jsonify({
-            'success': False,
-            'message': 'Error processing request'
-        }), 500
-    
-
-
-"""
 @app.route('/api/ai/voice/process', methods=['POST'])
 def process_voice():
     print("\n=== New Voice Request ===")
     print("Headers:", dict(request.headers))
 
     try:
-        # Usar el VoiceHandler existente
-        voice_result = voice_handler.handle_voice_request(request)
+        # Obtener el tipo de procesamiento de los parámetros de la URL
+        process_type = request.args.get('type', 'username')  # default a 'username'
+        voice_result = voice_handler.handle_voice_request(request, step=process_type)
         
-        # Devolver solo la transcripción y el idioma
         return jsonify({
             'success': True,
             'detected_language': voice_result.get('detected_language', 'es'),
-            'transcription': voice_result.get('transcription')
+            'transcription': voice_result.get('transcription'),
+            'username': voice_result.get('username') if process_type == 'username' else None,
+            'original_transcription': voice_result.get('original_transcription')
         })
 
     except Exception as e:
@@ -2558,244 +2288,6 @@ def process_voice():
         }), 500
 
 
-"""
-def process_message_with_language(data: dict, detected_language: str):
-    print("\n=== New Request with Language===")
-    print("Data:", data)
-    print("Detected Language:", detected_language)
-
-    try:
-        if 'message' not in data:
-            return jsonify({
-                'success': False,
-                'message': 'Location (message) is required',
-                'language': detected_language
-            })
-
-        location = data.get('message')
-        sector = data.get('sector')
-
-        print(f"\n===Validating Input===")
-        print(f"Location: {location}")
-        print(f"Sector: {sector}")
-
-        if not location:
-            return jsonify({
-                'success': False,
-                'message': 'Location cannot be empty',
-                'language': detected_language
-            })
-
-        print("\n=== Initializing ChatGPT===")
-        chatgpt = ChatGPTHelper()
-        
-        # Usar el nuevo método process_text_input
-        if not sector:
-            text_result = chatgpt.process_text_input(location)
-            if not text_result['success']:
-                return jsonify({
-                    'success': False,
-                    'message': text_result['message'],
-                    'language': detected_language
-                })
-            
-            return jsonify({
-                'success': True,
-                'message': text_result['message'],
-                'region': text_result['region'],
-                'language': text_result['detected_language'],
-                'needsSector': True
-            })
-
-        # El resto del código para cuando hay sector permanece igual
-        region_result = chatgpt.identify_region(location)
-        if not region_result['success']:
-            return jsonify({
-                'success': False,
-                'message': 'Location not in supported regions (North America, Europe, Asia)',
-                'language': detected_language
-            })
-
-        region = region_result['region']
-
-        if sector not in VALID_SECTORS:
-            return jsonify({
-                'success': False,
-                'message': f'Invalid sector. Must be one of: {",".join(VALID_SECTORS)}',
-                'language': detected_language
-            })
-
-        zoho_companies = zoho_service.get_accounts_by_industry_and_region(
-            industry=sector,
-            region=region
-        )
-
-        companies_needed = 20 - len(zoho_companies)
-        chatgpt_suggestions = []
-
-        if companies_needed > 0:
-            chatgpt_result = chatgpt.get_companies_suggestions(
-                sector=sector,
-                geography=region
-            )
-
-            if chatgpt_result['success']:
-                chatgpt_suggestions = chatgpt_result['content'][:companies_needed]
-
-        return jsonify({
-            'success': True,
-            'message': f'Found {sector} companies in {region}',
-            'companies': {
-                'zoho_companies': zoho_companies,
-                'suggested_companies': [
-                    {'name': company} for company in chatgpt_suggestions
-                ]
-            },
-            'language': detected_language
-        })
-
-    except Exception as e:
-        print(f"\n=== Error in message processing===")
-        print(f"Error type: {type(e).__name__}")
-        print(f"Error message: {str(e)}")
-        return jsonify({
-            'success': False,
-            'message': 'Error processing your request',
-            'language': detected_language
-        }), 500
-
-
-
-
-
-@app.route('/process-message', methods=['POST', 'OPTIONS'])
-def process_message():
-    print("\n=== New Request to /process-message ===")
-    print("Method:", request.method)
-    print("Headers:", dict(request.headers))
-    
-    if request.method == 'OPTIONS':
-        return jsonify({"status": "ok"})
-
-    try:
-        data = request.json
-        print("\n=== Request Data ===")
-        print("Received data:", data)  
-
-        location = data.get('message')
-        sector = data.get('sector')
-        detected_language = data.get('language') or chatgpt.detected_language_from_content(location)
-
-        print(f"\n=== Processing with parameters ===")
-        print(f"Location: {location}")
-        print(f"Sector: {sector}")
-        print(f"Language: {detected_language}")
-
-        # Validar entrada
-        if not location or sector is None:
-            error_message = chatgpt.translate_message(
-                'Both location and sector are required',
-                detected_language
-            )
-            return jsonify({
-                'success': False,
-                'message': error_message,
-                'language': detected_language
-            })
-
-        # Traducir sector
-        sector_result = chatgpt.translate_sector(sector)
-        if not sector_result['success'] or not sector_result['is_valid']:
-            error_message = f'Invalid sector. Must be one of: {sector_result.get("available_sectors", ", ".join(VALID_SECTORS))}'
-            translated_error = chatgpt.translate_message(error_message, detected_language)
-            return jsonify({
-                'success': False,
-                'message': translated_error,
-                'language': detected_language
-            })
-
-        translated_sector = sector_result['translated_sector']
-        displayed_sector = sector_result['displayed_sector']
-
-        # Identificar región
-        region_result = chatgpt.identify_region(location)
-        if not region_result['success']:
-            error_message = chatgpt.translate_message(
-                'Location not in supported regions (North America, Europe, Asia)',
-                detected_language
-            )
-            return jsonify({
-                'success': False,
-                'message': error_message,
-                'language': detected_language
-            })
-
-        region = region_result['region']
-
-        # Obtener empresas de Zoho
-        zoho_companies = zoho_service.get_accounts_by_industry_and_region(
-            industry=translated_sector,
-            region=region
-        )
-
-        # Obtener sugerencias de ChatGPT
-        companies_needed = 20 - len(zoho_companies)
-        chatgpt_suggestions = []
-
-        if companies_needed > 0:
-            print(f"\n=== Getting ChatGPT Suggestions ===")
-            print(f"Need {companies_needed} more companies")
-            
-            chatgpt_result = chatgpt.get_companies_suggestions(
-                sector=translated_sector,
-                geography=region
-            )
-            
-            if chatgpt_result['success']:
-                chatgpt_suggestions = chatgpt_result['content'][:companies_needed]
-                print(f"Got {len(chatgpt_suggestions)} suggestions from ChatGPT")
-
-        # Preparar respuesta
-        response_message = chatgpt.translate_message(
-            f"Found {displayed_sector} companies in {region}",
-            detected_language
-        )
-
-        response = {
-            'success': True,
-            'message': response_message,
-            'detected_language': detected_language,
-            'region': region,
-            'sector': {
-                'translated': translated_sector,
-                'displayed': displayed_sector
-            },
-            'companies': {
-                'zoho': zoho_companies,
-                'suggestions': [{'name': company} for company in chatgpt_suggestions],
-                'total_count': len(zoho_companies) + len(chatgpt_suggestions)
-            }
-           
-        }
-
-        print("\n=== Response prepared successfully ===")
-        print("Companies found:", response['companies']['total_count'])
-        return jsonify(response)
-
-    except Exception as e:
-        print(f"\n=== Error in process_message ===")
-        print(f"Error type: {type(e).__name__}")
-        print(f"Error message: {str(e)}")
-        error_message = chatgpt.translate_message(
-            'Error processing your request',
-            detected_language if 'detected_language' in locals() else 'en'
-        )
-        return jsonify({
-            'success': False,
-            'message': error_message,
-            'error_details': str(e)
-        }), 500
-    """
     
 @app.route('/api/ai/translate', methods=['POST', 'OPTIONS'])
 def translate():

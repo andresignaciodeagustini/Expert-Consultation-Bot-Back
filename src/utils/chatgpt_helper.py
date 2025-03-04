@@ -1,14 +1,17 @@
 from openai import OpenAI
 import logging
 import uuid
-from typing import Dict
+import re
+from typing import Dict, List, Any
 import os
 from dotenv import load_dotenv
 from typing import BinaryIO
 import tempfile
 from pathlib import Path
+from unidecode import unidecode
 import requests  
 from ..utils.config import VALID_SECTORS
+
 
 BOT_MESSAGES = {
     "region_prompt": "I've identified the region as {}. Please specify the business sector.",
@@ -465,69 +468,327 @@ class ChatGPTHelper:
                     "detected_language": self.current_language
                 }
             
-
-
-
-
-
-
-
-
-
-
-
-
-        
     def process_voice_input(self, audio_file: BinaryIO, step: str = 'transcribe') -> Dict:
         temp_path = None
         try:
-            logger.info(f"Processing voice input for transcription")
+            print("\n=== Processing Voice in ChatGPTHelper ===")
+            print(f"Audio file: {audio_file.filename}")
+            
+            if not audio_file:
+                raise ValueError("No audio file provided")
 
-            # Validaciones básicas del archivo
-            if not audio_file or not hasattr(audio_file, 'filename'):
-                return {
-                    "success": False,
-                    "error": "No valid audio file provided"
-                }
+            # Crear archivo temporal
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.webm') as temp_audio:
+                print(f"Creating temp file: {temp_audio.name}")
+                audio_file.save(temp_audio)
+                temp_path = temp_audio.name
 
-            # Crear y procesar archivo temporal
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.mp3') as temp_audio:
-                audio_file.seek(0)
-                temp_audio.write(audio_file.read())
-                temp_path = Path(temp_audio.name)
+            print(f"Temp file created: {temp_path}")
+            
+            # Verificar que el archivo existe y tiene contenido
+            if not os.path.exists(temp_path) or os.path.getsize(temp_path) == 0:
+                raise ValueError("Failed to save audio file")
 
-            # Transcripción del audio
+            print(f"File size: {os.path.getsize(temp_path)} bytes")
+
+            # Mapeo completo de nombres de idiomas a códigos ISO-639-1
+            language_codes = {
+                'afrikaans': 'af', 'albanian': 'sq', 'amharic': 'am', 'arabic': 'ar',
+                'armenian': 'hy', 'azerbaijani': 'az', 'basque': 'eu', 'belarusian': 'be',
+                'bengali': 'bn', 'bosnian': 'bs', 'bulgarian': 'bg', 'catalan': 'ca',
+                'cebuano': 'ceb', 'chinese': 'zh', 'corsican': 'co', 'croatian': 'hr',
+                'czech': 'cs', 'danish': 'da', 'dutch': 'nl', 'english': 'en',
+                'esperanto': 'eo', 'estonian': 'et', 'finnish': 'fi', 'french': 'fr',
+                'frisian': 'fy', 'galician': 'gl', 'georgian': 'ka', 'german': 'de',
+                'greek': 'el', 'gujarati': 'gu', 'haitian creole': 'ht', 'hausa': 'ha',
+                'hawaiian': 'haw', 'hebrew': 'he', 'hindi': 'hi', 'hmong': 'hmn',
+                'hungarian': 'hu', 'icelandic': 'is', 'igbo': 'ig', 'indonesian': 'id',
+                'irish': 'ga', 'italian': 'it', 'japanese': 'ja', 'javanese': 'jv',
+                'kannada': 'kn', 'kazakh': 'kk', 'khmer': 'km', 'korean': 'ko',
+                'kurdish': 'ku', 'kyrgyz': 'ky', 'lao': 'lo', 'latin': 'la',
+                'latvian': 'lv', 'lithuanian': 'lt', 'luxembourgish': 'lb',
+                'macedonian': 'mk', 'malagasy': 'mg', 'malay': 'ms', 'malayalam': 'ml',
+                'maltese': 'mt', 'maori': 'mi', 'marathi': 'mr', 'mongolian': 'mn',
+                'myanmar': 'my', 'nepali': 'ne', 'norwegian': 'no', 'nyanja': 'ny',
+                'odia': 'or', 'pashto': 'ps', 'persian': 'fa', 'polish': 'pl',
+                'portuguese': 'pt', 'punjabi': 'pa', 'romanian': 'ro', 'russian': 'ru',
+                'samoan': 'sm', 'scots gaelic': 'gd', 'serbian': 'sr', 'sesotho': 'st',
+                'shona': 'sn', 'sindhi': 'sd', 'sinhala': 'si', 'slovak': 'sk',
+                'slovenian': 'sl', 'somali': 'so', 'spanish': 'es', 'sundanese': 'su',
+                'swahili': 'sw', 'swedish': 'sv', 'tagalog': 'tl', 'tajik': 'tg',
+                'tamil': 'ta', 'telugu': 'te', 'thai': 'th', 'turkish': 'tr',
+                'ukrainian': 'uk', 'urdu': 'ur', 'uyghur': 'ug', 'uzbek': 'uz',
+                'vietnamese': 'vi', 'welsh': 'cy', 'xhosa': 'xh', 'yiddish': 'yi',
+                'yoruba': 'yo', 'zulu': 'zu'
+            }
+
+            # Primero detectar el idioma
             with open(temp_path, 'rb') as audio:
+                print("Detecting language...")
+                language_response = self.client.audio.transcriptions.create(
+                    model="whisper-1",
+                    file=audio,
+                    response_format="verbose_json"
+                )
+                
+                # Obtener el código ISO-639-1 del idioma
+                detected_language = getattr(language_response, 'language', 'en').lower()
+                
+                # Convertir a código ISO si es necesario
+                if detected_language in language_codes:
+                    detected_language = language_codes[detected_language]
+                    
+                print(f"Detected language code: {detected_language}")
+
+            # Luego transcribir con el idioma detectado
+            with open(temp_path, 'rb') as audio:
+                print("Starting transcription...")
                 transcript = self.client.audio.transcriptions.create(
                     model="whisper-1",
                     file=audio,
-                    response_format="text"  # Cambiado a "text" para simplificar
+                    response_format="text",
+                    language=detected_language  # Usar código ISO
                 )
+                
+                # Obtener transcripción inicial
+                raw_text = transcript if isinstance(transcript, str) else transcript.text
+                raw_text = raw_text.strip()
+                print(f"Initial transcription: {raw_text}")
 
-            # Obtener el texto transcrito
-            transcribed_text = transcript.strip()
-            print(f"Transcribed text: {transcribed_text}")  # Para debug
+                # Procesar según el paso indicado
+                if step == 'username':
+                    processed_text = self.process_username(raw_text)
+                    print(f"Processed username: {processed_text}")
+                    response_dict = {
+                        "success": True,
+                        "username": processed_text,
+                        "original_transcription": raw_text,
+                        "detected_language": detected_language,
+                        "language_name": next((name for name, code in language_codes.items() 
+                                            if code == detected_language), detected_language),
+                        "transcription": processed_text  # Para mantener compatibilidad
+                    }
+                else:  # step == 'transcribe' u otros casos
+                    response_dict = {
+                        "success": True,
+                        "transcription": raw_text,
+                        "detected_language": detected_language,
+                        "language_name": next((name for name, code in language_codes.items() 
+                                            if code == detected_language), detected_language)
+                    }
 
-            return {
-                "success": True,
-                "transcription": transcribed_text,
-                "detected_language": "es"
-            }
+                return response_dict
 
         except Exception as e:
-            logger.error(f"Error processing voice input: {str(e)}")
+            print(f"Error in process_voice_input: {str(e)}")
             return {
                 "success": False,
                 "error": str(e)
             }
         finally:
-            # Limpieza del archivo temporal
-            if temp_path and temp_path.exists():
+            if temp_path and os.path.exists(temp_path):
                 try:
-                    temp_path.unlink()
+                    os.remove(temp_path)
+                    print(f"Temp file removed: {temp_path}")
                 except Exception as e:
-                    logger.error(f"Error deleting temporary file: {str(e)}")
+                    print(f"Error removing temp file: {str(e)}")
     
+    def process_username(self, text: str) -> str:
+        try:
+            # Primero, eliminar el punto final si existe
+            text = text.rstrip('.')
+            
+            system_prompt = """
+            Eres un procesador especializado en nombres de usuario que sigue reglas ABSOLUTAS de formateo.
+
+            REGLA FUNDAMENTAL PARA PALABRAS DE INSTRUCCIÓN EN FRANCÉS:
+            - "souligne" es SIEMPRE una instrucción para usar "_", NUNCA es parte del nombre
+            - "point" o "points" es SIEMPRE una instrucción para usar ".", NUNCA es parte del nombre
+            - "tiret" es SIEMPRE una instrucción para usar "-", NUNCA es parte del nombre
+
+            EJEMPLO CRÍTICO DE INSTRUCCIÓN VS NOMBRE:
+            Input: "Claire souligne Bernard.33"
+            ❌ MAL: "claire.souligny-bernard.33" (interpretó "souligne" como parte del nombre)
+            ✅ BIEN: "claire_bernard.33" ("souligne" indica usar "_" entre nombres)
+
+            EJEMPLOS ESPECÍFICOS PARA PORTUGUÉS:
+            Input: "Ana Sublinhado Ferreira ponto 63"
+            ❌ MAL: "ana.sublinhado.ferreira63" (interpretó "sublinhado" como parte del nombre)
+            ✅ BIEN: "ana_ferreira.63" ("sublinhado" indica usar "_" entre nombres)
+
+            Input: "João ponto Silva sublinhado 25"
+            ❌ MAL: "joão.silva_25" (mantuvo caracteres especiales)
+            ✅ BIEN: "joao.silva_25" (convertido a ASCII)
+
+            Input: "Carlos ponto Costa sublinhado hífen 91"
+            ❌ MAL: "carlos.costa_hifen91" (interpretó "hífen" como parte del nombre)
+            ✅ BIEN: "carlos.costa-91" ("hífen" indica usar "-")
+
+            REGLAS DE PROCESAMIENTO DE INSTRUCCIONES:
+            1. Cuando escuches "souligne":
+            - SIEMPRE reemplazar por "_"
+            - NUNCA tratarlo como parte del nombre
+            - Usar el "_" para conectar las palabras adyacentes
+
+            2. Cuando escuches "point":
+            - SIEMPRE reemplazar por "."
+            - NUNCA tratarlo como parte del nombre
+            - Usar el "." para conectar las palabras adyacentes
+
+            3. Cuando escuches "tiret":
+            - SIEMPRE reemplazar por "-"
+            - NUNCA tratarlo como parte del nombre
+            - Usar el "-" para conectar las palabras adyacentes
+            
+            REGLA FUNDAMENTAL DE PRESERVACIÓN:
+            - La estructura de puntuación del texto original es SAGRADA
+            - Cada punto (.), guión (-) o subrayado (_) que existe en la entrada DEBE mantenerse EXACTAMENTE igual
+            - NUNCA convertir puntos en guiones o viceversa
+            - La única modificación permitida es: convertir a minúsculas y eliminar espacios
+
+            REGLA ABSOLUTA DE NOMBRES:
+            - NUNCA truncar nombres
+            - NUNCA modificar la longitud de los nombres
+            - NUNCA eliminar letras de los nombres
+            - Convertir a minúsculas pero mantener TODAS las letras
+            - Preservar la integridad completa del nombre
+
+            EJEMPLOS DE ERRORES REALES CORREGIDOS:
+
+            1. ERROR DE INTERPRETACIÓN DE INSTRUCCIONES:
+            Input: "Pierre point souligne Martin 45"
+            ❌ MAL: "pierre.point_souligne.martin45" (interpretó instrucciones como nombres)
+            ✅ BIEN: "pierre_martin45" (usó instrucciones como símbolos)
+
+            2. ERROR DE TRUNCAMIENTO DE NOMBRES:
+            Input: "Marie-Leclerc 98"
+            ❌ MAL: "mari-leclerc98" (truncó el nombre)
+            ✅ BIEN: "marie-leclerc98" (mantuvo nombre completo)
+
+            3. ERROR DE PALABRAS DE INSTRUCCIÓN:
+            Input: "Pierre Points souligne Dupont 45"
+            ❌ MAL: "pierre.points_souligne_dupont45" (mantuvo palabras de instrucción)
+            ✅ BIEN: "pierre_dupont45" (reemplazó instrucciones por símbolos)
+
+            4. ERROR DE MODIFICACIÓN DE SÍMBOLOS:
+            Input: "sophie.martin__22"
+            ❌ MAL: "sophie_martin_22" (cambió el punto por underscore)
+            ✅ BIEN: "sophie.martin_22" (mantuvo el punto original)
+
+            5. ERROR DE SÍMBOLOS CON NÚMEROS:
+            Input: "Thomas point Martin 45"
+            ❌ MAL: "thomas.martin_45" (añadió underscore antes del número)
+            ✅ BIEN: "thomas.martin45" (número concatenado directamente)
+
+            REGLAS CRÍTICAS ACTUALIZADAS:
+            1. Procesamiento de Instrucciones:
+            - SIEMPRE interpretar "souligne", "point", "tiret" como instrucciones
+            - NUNCA incluirlas como parte del nombre
+            - Usar sus símbolos correspondientes para conectar palabras
+
+            2. Procesamiento de Nombres:
+            - NUNCA truncar nombres
+            - NUNCA eliminar letras
+            - NUNCA modificar longitud de palabras
+            - Mantener TODAS las letras al convertir a minúsculas
+
+            3. Puntuación Original:
+            - NUNCA cambiar un punto (.) por otro símbolo
+            - NUNCA cambiar un guión (-) por otro símbolo
+            - NUNCA cambiar un underscore (_) por otro símbolo
+            - Mantener EXACTAMENTE los símbolos originales
+
+            4. Números:
+            - SIEMPRE concatenar directamente
+            - NUNCA añadir símbolos antes o después
+            - NUNCA separar números del texto
+
+            PROCESAMIENTO PARA OTROS IDIOMAS:
+            Russian:
+            - "нижнее подчеркивание" → "_"
+            - "точка" → "."
+            - "тире/дефис" → "-"
+
+            Japanese:
+            - "アンダースコア/アンダーバー" → "_"
+            - "ドット/テン" → "."
+            - "ハイフン/マイナス" → "-"
+
+            Italian:
+            - "underscore/sottolineatura/underline" → "_"
+            - "punto" → "."
+            - "trattino/lineetta" → "-"
+
+            Portuguese:
+            - "sublinhado/underline" → "_"
+            - "ponto" → "."
+            - "hífen/traço" → "-"
+
+            German:
+            - "unterstrich" → "_"
+            - "punkt" → "."
+            - "bindestrich/strich" → "-"
+
+            Spanish:
+            - "guion bajo/subrayado" → "_"
+            - "punto" → "."
+            - "guion/raya" → "-"
+
+            English:
+            - "underscore" → "_"
+            - "dot/point" → "."
+            - "dash/hyphen" → "-"
+
+            VERIFICACIÓN FINAL OBLIGATORIA:
+            1. ¿Se interpretaron correctamente las palabras de instrucción?
+            2. ¿Se mantuvieron TODAS las letras de los nombres reales?
+            3. ¿Se reemplazaron TODAS las palabras de instrucción por símbolos?
+            4. ¿Se mantuvieron EXACTAMENTE los símbolos originales?
+            5. ¿Se cambiaron puntos por guiones o viceversa? (ERROR)
+            6. ¿Se añadieron símbolos antes de números? (ERROR)
+            7. ¿Se añadieron símbolos no solicitados? (ERROR)
+            8. ¿Hay símbolos duplicados? (ERROR)
+            9. ¿Todo está en minúsculas?
+            10. ¿Se interpretó correctamente "souligne" como instrucción?
+
+            RECORDATORIO VITAL:
+            - "souligne", "point", "tiret" son SIEMPRE instrucciones
+            - NUNCA interpretar palabras de instrucción como nombres
+            - NUNCA truncar o modificar nombres reales
+            - NUNCA modificar símbolos existentes
+            - NUNCA añadir símbolos antes de números
+            - NUNCA añadir símbolos no solicitados
+            - SOLO convertir a minúsculas y aplicar instrucciones
+            - Mantener EXACTAMENTE la puntuación original
+            """
+
+            response = self.client.chat.completions.create(
+                model="gpt-4",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": system_prompt
+                    },
+                    {
+                        "role": "user",
+                        "content": f"Procesa este nombre manteniendo la puntuación exacta: {text}"
+                    }
+                ],
+                temperature=0.1
+            )
+
+            processed_names = response.choices[0].message.content.strip().lower()
+            # Convertir caracteres especiales a ASCII y mantener puntuación
+            processed_names = unidecode(processed_names)
+            # Solo eliminar espacios, mantener toda otra puntuación
+            processed_names = processed_names.replace(" ", "")
+            print(f"Converted username: {processed_names}")
+            return processed_names
+
+        except Exception as e:
+            print(f"Error processing username: {str(e)}")
+            return text
+
 
 
     def process_sector_input(self, audio_file: BinaryIO, previous_region: str) -> Dict:
@@ -1308,5 +1569,109 @@ class ChatGPTHelper:
                 "name": None
             }
 
+    def correct_email(self, email: str, instruction: str) -> Dict:
+        try:
+            # 1. Validación inicial del email
+            email_pattern = r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b"
+            if not re.match(email_pattern, email):
+                return {
+                    "success": False,
+                    "original_email": email,
+                    "correction_applied": False,
+                    "error": "Invalid original email format"
+                }
 
+            # 2. Procesar instrucciones formateadas
+            if instruction.startswith('REMOVE:'):
+                # Extraer las partes de la instrucción
+                parts = instruction.split(',')
+                remove_part = parts[0].strip()
+                
+                # Extraer la palabra a remover
+                remove_word = remove_part.split('"')[1] if '"' in remove_part else remove_part.replace('REMOVE:', '').strip()
+                
+                # Procesar el email
+                email_parts = email.split('@')
+                username = email_parts[0]
+                
+                # Aplicar la corrección
+                corrected_username = username.lower().replace(remove_word.lower(), '').strip()
+                corrected_email = f"{corrected_username}@gmail.com"
+                correction_applied = email.lower() != corrected_email.lower()
 
+                print(f"Processing removal: {remove_word}")
+                print(f"Original email: {email}")
+                print(f"Corrected email: {corrected_email}")
+                
+                return {
+                    'success': True,
+                    'original_email': email,
+                    'corrected_email': corrected_email,
+                    'correction_applied': correction_applied,
+                    'correction_text': instruction
+                }
+
+            # 3. Procesar instrucciones REPLACE (para portugués y otros)
+            if instruction.upper().startswith('REPLACE:'):
+                try:
+                    # Extraer las letras a reemplazar
+                    match = re.search(r'REPLACE: "([^"]+)" WITH: "([^"]+)"', instruction)
+                    if match:
+                        old_char, new_char = match.groups()
+                        username, domain = email.split('@')
+                        corrected_username = username.replace(old_char, new_char)
+                        corrected_email = f"{corrected_username}@{domain}"
+                        correction_applied = email != corrected_email
+
+                        print(f"Processing REPLACE command:")
+                        print(f"Old char: {old_char}")
+                        print(f"New char: {new_char}")
+                        print(f"Original email: {email}")
+                        print(f"Corrected email: {corrected_email}")
+
+                        return {
+                            'success': True,
+                            'original_email': email,
+                            'corrected_email': corrected_email,
+                            'correction_applied': correction_applied,
+                            'correction_text': instruction
+                        }
+                except Exception as e:
+                    print(f"Error processing REPLACE command: {str(e)}")
+
+            # 4. Procesar instrucciones regulares
+            username, domain = email.split('@')
+            corrected_username = username
+
+            instruction_lower = instruction.lower()
+            if "replace" in instruction_lower or "reemplaza" in instruction_lower:
+                try:
+                    if '"' in instruction:
+                        old_char = instruction.split('"')[1]
+                        new_char = instruction.split('"')[3]
+                        corrected_username = username.replace(old_char, new_char)
+                except Exception as e:
+                    print(f"Error processing instruction: {str(e)}")
+                    corrected_username = username
+
+            # 5. Construir resultado final
+            corrected_email = f"{corrected_username}@{domain}"
+            correction_applied = email.lower() != corrected_email.lower()
+
+            return {
+                "success": True,
+                "original_email": email,
+                "correction_text": instruction,
+                "correction_applied": correction_applied,
+                "corrected_email": corrected_email
+            }
+
+        except Exception as e:
+            print(f"Error in correct_email: {str(e)}")
+            return {
+                "success": False,
+                "original_email": email,
+                "correction_applied": False,
+                "error": str(e),
+                "corrected_email": email
+            }
