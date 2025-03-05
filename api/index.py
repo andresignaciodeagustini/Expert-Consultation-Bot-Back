@@ -1472,7 +1472,6 @@ def exclude_companies():
         }), 500
 
 
-
 @app.route('/api/client-perspective', methods=['POST'])
 def client_perspective():
     try:
@@ -1480,31 +1479,25 @@ def client_perspective():
         data = request.json
         
         if LAST_DETECTED_LANGUAGE is None:
-            LAST_DETECTED_LANGUAGE = 'es'
+            LAST_DETECTED_LANGUAGE = 'en-US'
         
         chatgpt = ChatGPTHelper()
         zoho_service = ZohoService()
 
         if 'answer' in data:
             text_processing_result = chatgpt.process_text_input(data['answer'], LAST_DETECTED_LANGUAGE)
-            detected_language = text_processing_result.get('detected_language', 'es')
+            detected_language = text_processing_result.get('detected_language', 'en-US')
             LAST_DETECTED_LANGUAGE = detected_language
         else:
             detected_language = LAST_DETECTED_LANGUAGE
 
-        BASE_MESSAGES = {
-            'ask_preference': "Would you like to include experts from companies that are clients or users of this industry?",
-            'confirmed_yes': "Perfect! I will include experts from client-side companies in the search.",
-            'confirmed_no': "Understood. I will not include client-side perspectives in the search.",
-            'processing_error': "An error occurred while processing your request.",
-            'invalid_response': "Could not determine your preference. Please answer yes or no."
-        }
-
         if not data.get('answer'):
-            initial_message = chatgpt.translate_message(BASE_MESSAGES['ask_preference'], detected_language)
             return jsonify({
                 'success': True,
-                'message': initial_message,
+                'message': chatgpt.translate_message(
+                    "Would you like to include client-side companies?",
+                    detected_language
+                ),
                 'detected_language': detected_language,
                 'sector': data.get('sector'),
                 'region': data.get('region'),
@@ -1515,24 +1508,32 @@ def client_perspective():
         intention = intention_result.get('intention') if intention_result.get('success') else None
 
         if intention == 'yes':
-            base_message = BASE_MESSAGES['confirmed_yes']
-            
             client_companies_result = chatgpt.get_client_side_companies(
                 sector=data.get('sector', 'Financial Services'),
                 geography=data.get('region', 'Europe'),
-                excluded_companies=EXCLUDED_COMPANIES  # Añadir las exclusiones
+                excluded_companies=EXCLUDED_COMPANIES
             )
             
             if not client_companies_result['success']:
                 return jsonify({
                     'success': False,
-                    'message': "Error generating client-side companies",
+                    'message': chatgpt.translate_message(
+                        "Error generating client-side companies",
+                        detected_language
+                    ),
                     'detected_language': detected_language
                 }), 400
 
             return jsonify({
                 'success': True,
-                'message': chatgpt.translate_message(base_message, detected_language),
+                'message': chatgpt.translate_message(
+                    "Perfect! I will include client-side companies in the search.",
+                    detected_language
+                ),
+                'message_prefix': chatgpt.translate_message(
+                    "Here are the recommended companies, with verified companies listed first. Do you agree with this list?",
+                    detected_language
+                ),
                 'detected_language': detected_language,
                 'sector': data.get('sector'),
                 'region': data.get('region'),
@@ -1541,10 +1542,12 @@ def client_perspective():
             })
             
         elif intention == 'no':
-            base_message = BASE_MESSAGES['confirmed_no']
             return jsonify({
                 'success': True,
-                'message': chatgpt.translate_message(base_message, detected_language),
+                'message': chatgpt.translate_message(
+                    "Understood. I will not include client-side companies.",
+                    detected_language
+                ),
                 'detected_language': detected_language,
                 'sector': data.get('sector'),
                 'region': data.get('region'),
@@ -1552,23 +1555,24 @@ def client_perspective():
                 'stage': 'response'
             })
         else:
-            error_message = chatgpt.translate_message(BASE_MESSAGES['invalid_response'], detected_language)
             return jsonify({
                 'success': False,
-                'message': error_message,
+                'message': chatgpt.translate_message(
+                    "Please answer yes or no.",
+                    detected_language
+                ),
                 'detected_language': detected_language
             }), 400
 
     except Exception as e:
-        error_message = chatgpt.translate_message(
-            BASE_MESSAGES['processing_error'],
-            detected_language if 'detected_language' in locals() else 'es'
-        )
         return jsonify({
             'success': False,
-            'message': error_message,
+            'message': chatgpt.translate_message(
+                "An error occurred while processing your request.",
+                detected_language if 'detected_language' in locals() else 'en-US'
+            ),
             'error': str(e),
-            'detected_language': detected_language if 'detected_language' in locals() else 'es'
+            'detected_language': detected_language if 'detected_language' in locals() else 'en-US'
         }), 500
     ############################################
 
@@ -1585,31 +1589,25 @@ def supply_chain_experience():
         data = request.json
         
         if LAST_DETECTED_LANGUAGE is None:
-            LAST_DETECTED_LANGUAGE = 'es'
+            LAST_DETECTED_LANGUAGE = 'en-US'
         
         chatgpt = ChatGPTHelper()
         zoho_service = ZohoService()
 
         if 'answer' in data:
             text_processing_result = chatgpt.process_text_input(data['answer'], LAST_DETECTED_LANGUAGE)
-            detected_language = text_processing_result.get('detected_language', 'es')
+            detected_language = text_processing_result.get('detected_language', 'en-US')
             LAST_DETECTED_LANGUAGE = detected_language
         else:
             detected_language = LAST_DETECTED_LANGUAGE
 
-        BASE_MESSAGES = {
-            'ask_preference': "Would you like to include experts from companies that provide technology and services to this industry?",
-            'confirmed_yes': "Perfect! I will include experts from supply-side companies in the search.",
-            'confirmed_no': "Understood. I will not include supply-side perspectives in the search.",
-            'processing_error': "An error occurred while processing your request.",
-            'invalid_response': "Could not determine your preference. Please answer yes or no."
-        }
-
         if not data.get('answer'):
-            initial_message = chatgpt.translate_message(BASE_MESSAGES['ask_preference'], detected_language)
             return jsonify({
                 'success': True,
-                'message': initial_message,
+                'message': chatgpt.translate_message(
+                    "Would you like to include supply chain companies?",
+                    detected_language
+                ),
                 'detected_language': detected_language,
                 'sector': data.get('sector'),
                 'region': data.get('region'),
@@ -1620,25 +1618,32 @@ def supply_chain_experience():
         intention = intention_result.get('intention') if intention_result.get('success') else None
 
         if intention == 'yes':
-            base_message = BASE_MESSAGES['confirmed_yes']
-            
             supply_companies_result = chatgpt.get_supply_chain_companies(
                 sector=data.get('sector', 'Financial Services'),
                 geography=data.get('region', 'Europe'),
-                excluded_companies=EXCLUDED_COMPANIES  # Añadir las exclusiones
+                excluded_companies=EXCLUDED_COMPANIES
             )
             
             if not supply_companies_result['success']:
                 return jsonify({
                     'success': False,
-                    'message': "Error generating supply chain companies",
+                    'message': chatgpt.translate_message(
+                        "Error generating supply chain companies",
+                        detected_language
+                    ),
                     'detected_language': detected_language
                 }), 400
 
-            # Simplificar la respuesta para incluir solo lo necesario
             return jsonify({
                 'success': True,
-                'message': chatgpt.translate_message(base_message, detected_language),
+                'message': chatgpt.translate_message(
+                    "Perfect! I will include supply chain companies in the search.",
+                    detected_language
+                ),
+                'message_prefix': chatgpt.translate_message(
+                    "Here are the recommended companies, with verified companies listed first. Do you agree with this list?",
+                    detected_language
+                ),
                 'detected_language': detected_language,
                 'sector': data.get('sector'),
                 'region': data.get('region'),
@@ -1647,10 +1652,12 @@ def supply_chain_experience():
             })
             
         elif intention == 'no':
-            base_message = BASE_MESSAGES['confirmed_no']
             return jsonify({
                 'success': True,
-                'message': chatgpt.translate_message(base_message, detected_language),
+                'message': chatgpt.translate_message(
+                    "Understood. I will not include supply chain companies.",
+                    detected_language
+                ),
                 'detected_language': detected_language,
                 'sector': data.get('sector'),
                 'region': data.get('region'),
@@ -1658,27 +1665,27 @@ def supply_chain_experience():
                 'stage': 'response'
             })
         else:
-            error_message = chatgpt.translate_message(BASE_MESSAGES['invalid_response'], detected_language)
             return jsonify({
                 'success': False,
-                'message': error_message,
+                'message': chatgpt.translate_message(
+                    "Please answer yes or no.",
+                    detected_language
+                ),
                 'detected_language': detected_language
             }), 400
 
     except Exception as e:
-        error_message = chatgpt.translate_message(
-            BASE_MESSAGES['processing_error'],
-            detected_language if 'detected_language' in locals() else 'es'
-        )
         return jsonify({
             'success': False,
-            'message': error_message,
+            'message': chatgpt.translate_message(
+                "An error occurred while processing your request.",
+                detected_language if 'detected_language' in locals() else 'en-US'
+            ),
             'error': str(e),
-            'detected_language': detected_language if 'detected_language' in locals() else 'es'
+            'detected_language': detected_language if 'detected_language' in locals() else 'en-US'
         }), 500
+
     ###############################################################3
-
-
 
 
 
@@ -1693,13 +1700,21 @@ def evaluation_questions():
     try:
         global LAST_DETECTED_LANGUAGE
         data = request.json
+        print("\n=== Evaluation Questions Endpoint ===")
+        print("Received data:", data)
+        print("Answer received:", data.get('answer', ''))
+        
         answer = data.get('answer', '')
+        stage = data.get('stage', 'initial_question')  # Obtener el stage actual
         chatgpt = ChatGPTHelper()
         
         # Procesar idioma
         text_processing_result = chatgpt.process_text_input(answer if answer else "test", LAST_DETECTED_LANGUAGE)
         detected_language = text_processing_result.get('detected_language', 'en')
         LAST_DETECTED_LANGUAGE = detected_language
+        
+        print("Detected language:", detected_language)
+        print("Current stage:", stage)
 
         BASE_MESSAGES = {
             'ask_preference': "Would you like to add evaluation questions for the project?",
@@ -1719,38 +1734,50 @@ def evaluation_questions():
                 'stage': 'initial_question'
             })
 
-        # Procesar respuesta sí/no
-        normalized_answer = answer.lower().strip()
-        if normalized_answer in ['si', 'sí', 'yes', 's', 'y']:
-            response_message = chatgpt.translate_message(BASE_MESSAGES['confirmed_yes'], detected_language)
-            return jsonify({
-                'success': True,
-                'message': response_message,
-                'detected_language': detected_language,
-                'evaluation_required': True,
-                'answer_received': 'yes',
-                'stage': 'confirmed'
-            })
-        elif normalized_answer in ['no', 'n']:
-            response_message = chatgpt.translate_message(BASE_MESSAGES['confirmed_no'], detected_language)
-            return jsonify({
-                'success': True,
-                'message': response_message,
-                'detected_language': detected_language,
-                'evaluation_required': False,
-                'answer_received': 'no',
-                'stage': 'confirmed'
-            })
+        # Solo validar sí/no en la etapa inicial
+        if stage == 'initial_question':
+            normalized_answer = answer.lower().strip()
+            if normalized_answer in ['si', 'sí', 'yes', 's', 'y']:
+                response_message = chatgpt.translate_message(BASE_MESSAGES['confirmed_yes'], detected_language)
+                return jsonify({
+                    'success': True,
+                    'message': response_message,
+                    'detected_language': detected_language,
+                    'evaluation_required': True,
+                    'answer_received': 'yes',
+                    'stage': 'questions'
+                })
+            elif normalized_answer in ['no', 'n']:
+                response_message = chatgpt.translate_message(BASE_MESSAGES['confirmed_no'], detected_language)
+                return jsonify({
+                    'success': True,
+                    'message': response_message,
+                    'detected_language': detected_language,
+                    'evaluation_required': False,
+                    'answer_received': 'no',
+                    'stage': 'confirmed'
+                })
+            else:
+                error_message = chatgpt.translate_message(BASE_MESSAGES['invalid_response'], detected_language)
+                return jsonify({
+                    'success': False,
+                    'message': error_message,
+                    'detected_language': detected_language,
+                    'stage': 'error'
+                }), 400
         else:
-            error_message = chatgpt.translate_message(BASE_MESSAGES['invalid_response'], detected_language)
+            # Si estamos en cualquier otra etapa, aceptar la respuesta como pregunta válida
             return jsonify({
-                'success': False,
-                'message': error_message,
+                'success': True,
+                'message': answer,
                 'detected_language': detected_language,
-                'stage': 'error'
-            }), 400
+                'stage': 'questions_received',
+                'evaluation_required': True,
+                'answer_received': answer
+            })
 
     except Exception as e:
+        print("Error in evaluation_questions:", str(e))
         error_message = chatgpt.translate_message(BASE_MESSAGES['processing_error'], 
             detected_language if 'detected_language' in locals() else 'en')
         return jsonify({
@@ -1761,20 +1788,32 @@ def evaluation_questions():
         }), 500
     
 
+
+
+
+
+
+
 @app.route('/api/evaluation-questions-sections', methods=['POST'])
 def evaluation_questions_sections():
     try:
         global LAST_DETECTED_LANGUAGE
         data = request.json
+        print("\n=== Evaluation Questions Sections Endpoint ===")
+        print("Received data:", data)
+        
         chatgpt = ChatGPTHelper()
         detected_language = LAST_DETECTED_LANGUAGE if LAST_DETECTED_LANGUAGE else data.get('language', 'en')
+        print("Working with language:", detected_language)
 
         # Verificar campos requeridos
         required_fields = ['sector', 'region', 'selected_categories']
         if not all(field in data for field in required_fields):
+            missing_fields = [field for field in required_fields if field not in data]
+            print("Missing required fields:", missing_fields)
             return jsonify({
                 'success': False,
-                'message': 'Missing required fields: sector, region, or selected_categories',
+                'message': f'Missing required fields: {", ".join(missing_fields)}',
                 'detected_language': detected_language
             }), 400
 
@@ -1783,20 +1822,21 @@ def evaluation_questions_sections():
         current_category = data.get('current_category')
         answer = data.get('answer')
 
-        # Si se proporciona una respuesta, guardarla para la categoría actual
+        print(f"Processing - Current Category: {current_category}")
+        print(f"Current Questions State: {current_questions}")
+        print(f"Selected Categories: {selected_categories}")
+
         if current_category and answer:
+            print(f"Saving answer for {current_category}")
             current_questions[current_category] = answer
 
-        # Determinar categorías pendientes
         pending_categories = []
-        if selected_categories.get('main', False) and 'main' not in current_questions:
-            pending_categories.append('main')
-        if selected_categories.get('client', False) and 'client' not in current_questions:
-            pending_categories.append('client')
-        if selected_categories.get('supply_chain', False) and 'supply_chain' not in current_questions:
-            pending_categories.append('supply_chain')
+        for category in ['main', 'client', 'supply_chain']:
+            if selected_categories.get(category, False) and category not in current_questions:
+                pending_categories.append(category)
 
-        # Determinar mensaje según la categoría
+        print(f"Pending categories: {pending_categories}")
+
         category_messages = {
             'main': "Please provide screening questions for main companies in the sector.",
             'client': "Please provide screening questions for client companies.",
@@ -1805,7 +1845,7 @@ def evaluation_questions_sections():
 
         if pending_categories:
             next_category = pending_categories[0]
-            message = category_messages.get(next_category, f"Please provide screening questions for {next_category} category.")
+            message = category_messages.get(next_category)
             translated_message = chatgpt.translate_message(message, detected_language)
             
             return jsonify({
@@ -1829,12 +1869,105 @@ def evaluation_questions_sections():
             })
 
     except Exception as e:
+        print("Error in evaluation_questions_sections:", str(e))
         return jsonify({
             'success': False,
             'message': 'An error occurred while processing your request.',
             'error': str(e),
             'detected_language': detected_language if 'detected_language' in locals() else 'en'
         }), 500
+
+@app.route('/api/save-evaluation', methods=['POST'])
+def save_evaluation():
+    try:
+        data = request.json
+        print("\n=== Save Evaluation Endpoint ===")
+        print("Received data:", data)
+
+        required_fields = ['project_id', 'evaluation_data']
+        if not all(field in data for field in required_fields):
+            missing_fields = [field for field in required_fields if field not in data]
+            print("Missing required fields:", missing_fields)
+            return jsonify({
+                'success': False,
+                'message': f'Missing required fields: {", ".join(missing_fields)}'
+            }), 400
+
+        project_id = data['project_id']
+        evaluation_data = data['evaluation_data']
+        
+        # Agregar timestamp
+        evaluation_data['timestamp'] = datetime.utcnow().isoformat()
+        
+        # Aquí iría la lógica para guardar en la base de datos
+        # Por ejemplo:
+        # db.evaluations.insert_one({
+        #     'project_id': project_id,
+        #     'evaluation_data': evaluation_data,
+        #     'created_at': datetime.utcnow()
+        # })
+
+        print(f"Evaluation saved successfully for project {project_id}")
+        return jsonify({
+            'success': True,
+            'message': 'Evaluation saved successfully',
+            'project_id': project_id
+        })
+
+    except Exception as e:
+        print("Error in save_evaluation:", str(e))
+        return jsonify({
+            'success': False,
+            'message': 'An error occurred while saving the evaluation',
+            'error': str(e)
+        }), 500
+
+@app.route('/api/get-evaluation/<project_id>', methods=['GET'])
+def get_evaluation(project_id):
+    try:
+        print(f"\n=== Get Evaluation Endpoint ===")
+        print(f"Requesting evaluation for project: {project_id}")
+
+        if not project_id:
+            return jsonify({
+                'success': False,
+                'message': 'Project ID is required'
+            }), 400
+
+        # Aquí iría la lógica para obtener de la base de datos
+        # Por ejemplo:
+        # evaluation = db.evaluations.find_one({'project_id': project_id})
+        
+        # Por ahora, retornamos un mock
+        mock_evaluation = {
+            'project_id': project_id,
+            'evaluation_data': {
+                'main': ['Question 1', 'Question 2'],
+                'client': ['Client Question 1'],
+                'supply_chain': ['Supply Chain Question 1', 'Supply Chain Question 2']
+            },
+            'timestamp': datetime.utcnow().isoformat()
+        }
+
+        print(f"Retrieved evaluation data for project {project_id}")
+        return jsonify({
+            'success': True,
+            'evaluation': mock_evaluation
+        })
+
+    except Exception as e:
+        print("Error in get_evaluation:", str(e))
+        return jsonify({
+            'success': False,
+            'message': 'An error occurred while retrieving the evaluation',
+            'error': str(e)
+        }), 500
+
+
+
+
+
+
 
 
 
@@ -2022,7 +2155,6 @@ def industry_experts():
 
 
 
-
 @app.route('/api/select-experts', methods=['POST'])
 def select_experts():
     try:
@@ -2044,7 +2176,7 @@ def select_experts():
         BASE_MESSAGES = {
             'expert_required': 'At least one expert must be selected',
             'no_data_found': 'No expert data found',
-            'expert_selected': 'You have selected the expert {name}.',
+            'expert_selected': 'You have selected the expert(s):',
             'expert_not_found': 'No expert found with the name {name}',
             'processing_error': 'An error occurred while processing your request.',
             'thank_you': 'Thank you for your selection! We will process your request.'
@@ -2063,36 +2195,50 @@ def select_experts():
                 'message': chatgpt.translate_message(BASE_MESSAGES['no_data_found'], detected_language)
             }), 400
 
-        # Buscar el experto en todas las categorías
-        selected_expert = None
-        expert_category = None
-        expert_name = selected_experts[0].lower()
+        # Lista para almacenar expertos encontrados
+        found_experts = []
+
+        # Buscar expertos que coincidan con el nombre o apellido
+        search_term = selected_experts[0].lower()
+        name_parts = search_term.split()
 
         for category, category_data in all_experts_data['experts'].items():
             for expert in category_data.get('experts', []):
-                if expert['name'].lower() == expert_name:
-                    selected_expert = expert
-                    expert_category = category
-                    break
-            if selected_expert:
-                break
+                expert_name_lower = expert['name'].lower()
+                
+                # Verificar si cualquier parte del nombre buscado coincide
+                if any(part in expert_name_lower for part in name_parts):
+                    found_experts.append({
+                        'expert': expert,
+                        'category': category
+                    })
 
-        if selected_expert:
-            # Crear versión filtrada de expert_details
-            expert_response = {
-                'name': selected_expert['name'],
-                'current_role': selected_expert['current_role'],
-                'current_employer': selected_expert['current_employer'],
-                'experience': selected_expert['experience'],
-                'location': selected_expert['location'],
-                'category': expert_category
-            }
+        if found_experts:
+            # Preparar respuesta con todos los expertos encontrados
+            expert_responses = []
+            for found_expert in found_experts:
+                expert = found_expert['expert']
+                category = found_expert['category']
+                
+                expert_response = {
+                    'name': expert['name'],
+                    'current_role': expert['current_role'],
+                    'current_employer': expert['current_employer'],
+                    'experience': expert['experience'],
+                    'location': expert['location'],
+                    'category': category
+                }
+                expert_responses.append(expert_response)
 
-            # Obtener preguntas específicas para la categoría del experto
-            category_questions = evaluation_questions.get(expert_category, [])
+            # Obtener preguntas específicas para la categoría
+            category_questions = {}
+            for found_expert in found_experts:
+                category = found_expert['category']
+                if category not in category_questions:
+                    category_questions[category] = evaluation_questions.get(category, [])
 
             selection_message = chatgpt.translate_message(
-                BASE_MESSAGES['expert_selected'].format(name=selected_expert['name']),
+                BASE_MESSAGES['expert_selected'],
                 detected_language
             )
             
@@ -2104,7 +2250,8 @@ def select_experts():
             response_data = {
                 'success': True,
                 'message': selection_message,
-                'expert_details': expert_response,
+                'experts_found': len(expert_responses),
+                'expert_details': expert_responses,
                 'screening_questions': category_questions,
                 'final_message': thank_you_message,
                 'detected_language': detected_language
