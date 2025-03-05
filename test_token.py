@@ -14,7 +14,7 @@ print(f"Env file exists: {env_path.exists()}")
 
 # Cargar .env
 load_dotenv(env_path)
-token = os.getenv('ZOHO_ACCESS_TOKEN')
+token = os.getenv('ZOHO_RECRUIT_ACCESS_TOKEN')
 
 print(f"\n=== Token Info ===")
 print(f"Token found: {'Yes' if token else 'No'}")
@@ -25,7 +25,7 @@ if token:
 # Probar el token
 if token:
     try:
-        url = "https://www.zohoapis.com/crm/v2/Accounts"
+        url = "https://recruit.zoho.com/recruit/v2/Candidates"
         headers = {
             'Authorization': f'Zoho-oauthtoken {token}'
         }

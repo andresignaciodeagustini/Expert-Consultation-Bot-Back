@@ -2,7 +2,7 @@ from openai import OpenAI
 import logging
 import uuid
 import re
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Set
 import os
 from dotenv import load_dotenv
 from typing import BinaryIO
@@ -121,7 +121,6 @@ class ChatGPTHelper:
             logger.error(f"Translation error: {str(e)}")
             return message  # Retorna el mensaje original si hay error
             
-
     def process_text_input(self, text: str, previous_language: str = None) -> Dict:
         try:
             context_info = f"Previous detected language: {previous_language}" if previous_language else "No previous language context"
@@ -136,72 +135,57 @@ class ChatGPTHelper:
                     1. Detect the language and return ONLY the precise ISO code (e.g., fr-FR, es-ES, it-IT, en-US, pt-BR)
                     
                     2. IMPORTANT CONTEXT RULES:
-                    - If the text is ambiguous, return the previous language
-                    - If the text is very short (1 or 2 words), return the previous language
-                    - If the text only contains proper names, return the previous language
-                    - If the text only contains company names, return the previous language
-                    - If the text only contains country names, return the previous language
-                    - Only override previous language if the text clearly belongs to a different language
+                    - VERY SHORT TEXT DEFINITION: Only single words or standalone email addresses
+                    Examples of very short text:
+                    * "no"
+                    * "yes"
+                    * "email@email.com"
+                    * "hola"
+                    
+                    - NOT considered very short text:
+                    * "my email"
+                    * "mi correo es"
+                    * "the email is email@email.com"
+                    * "hello there"
+
+                    - If text is VERY SHORT (single word or standalone email), return previous language
+                    - If text contains clear language indicators (like "my email is", "mi correo es"), detect that language
+                    - If text contains email BUT also has words, analyze the surrounding text
+                    - Only override previous language if there's clear language evidence
                     
                     3. PRIORITY RULES:
-                    - Always prioritize the sentence structure and context over proper names
-                    - Ignore proper names when they conflict with the main text language
+                    - Always analyze complete phrases over individual words
+                    - Email addresses should not influence language detection
                     - Focus on grammatical structure and common words
                     - When finding proper names, prioritize the surrounding text
 
                     4. YES/NO REFERENCE TABLE (use for language detection):
                     English (en-US): yes, yeah, yep, sure, certainly, no, nope, nah
                     Spanish (es-ES): sí, si, claro, efectivamente, por supuesto, no, nop, para nada
-                    French (fr-FR): oui, ouais, bien sûr, certainement, non, pas du tout
-                    Italian (it-IT): sì, si, certo, certamente, esatto, no, non
-                    German (de-DE): ja, jawohl, doch, natürlich, selbstverständlich, nein, nö
-                    Portuguese (pt-BR/pt-PT): sim, claro, certamente, não, nao
-                    Japanese (ja-JP): はい (hai), うん (un), ええ (ee), そう (sou), いいえ (iie), いや (iya), ちがう (chigau)
-                    Chinese Simplified (zh-CN): 是的 (shì de), 好的 (hǎo de), 对 (duì), 不是 (bú shì), 不 (bù), 没有 (méi yǒu)
-                    Chinese Traditional (zh-TW): 是的, 好的, 對, 不是, 不, 沒有
-                    Russian (ru-RU): да (da), конечно (konechno), разумеется, нет (net), нету (netu)
-                    Arabic (ar-SA): نعم (na'am), أجل (ajal), طبعا (tab'an), لا (la), كلا (kalla)
-                    Korean (ko-KR): 네 (ne), 예 (ye), 그렇습니다 (geureoseumnida), 아니요 (aniyo), 아니 (ani)
-                    Dutch (nl-NL): ja, jawel, zeker, natuurlijk, nee, neen
-                    Swedish (sv-SE): ja, jovisst, absolut, visst, nej, inte
-                    Norwegian (no-NO): ja, jo, jepp, nei, neppe
-                    Danish (da-DK): ja, jo, jep, nej, næ
-                    Finnish (fi-FI): kyllä, joo, juu, ei, eikä
-                    Polish (pl-PL): tak, no tak, owszem, nie, nigdy
-                    Turkish (tr-TR): evet, tabii, elbette, hayır, yok
-                    Greek (el-GR): ναι (nai), μάλιστα (malista), όχι (ochi), μπα (ba)
-                    Hindi (hi-IN): हाँ (haan), जी हाँ (ji haan), नहीं (nahin), बिल्कुल नहीं (bilkul nahin)
-                    Vietnamese (vi-VN): có, vâng, đúng, không, không phải
-                    Thai (th-TH): ใช่ (chai), ครับ/ค่ะ (khrap/kha), ไม่ (mai), ไม่ใช่ (mai chai)
-                    Indonesian (id-ID): ya, iya, betul, tidak, nggak
-                    Hebrew (he-IL): כן (ken), בטח (betach), לא (lo), אין (ein)
-                    Czech (cs-CZ): ano, jo, ne, nikoliv
-                    Hungarian (hu-HU): igen, ja, nem, dehogy
+                    [... resto de la tabla igual ...]
 
                     IMPORTANT: 
                     - Return ONLY the language code
-                    - For ambiguous cases, return the previous language
-                    - For very short texts, return the previous language
-                    - For proper names only, return the previous language
+                    - For single words, return the previous language
+                    - For standalone emails, return the previous language
+                    - For phrases, detect the actual language
                     
                     Examples with context:
-                    Previous language fr-FR:
-                    - "Microsoft" → fr-FR (company name only)
-                    - "España" → fr-FR (country name only)
-                    - "Pierre" → fr-FR (proper name only)
-                    - "oui" → fr-FR (short response)
-                    - "John Smith" → fr-FR (proper names only)
-                    - "Bonjour Pierre" → fr-FR (clear French)
-                    - "Hello Pierre" → en-US (clear English despite name)
-                    
                     Previous language es-ES:
-                    - "Google" → es-ES (company name only)
-                    - "Francia" → es-ES (country name only)
-                    - "María" → es-ES (proper name only)
-                    - "sí" → es-ES (short response)
-                    - "Juan García" → es-ES (proper names only)
-                    - "Hola María" → es-ES (clear Spanish)
-                    - "Hello María" → en-US (clear English despite name)"""
+                    - "email@test.com" → es-ES (standalone email)
+                    - "no" → es-ES (single word)
+                    - "mi correo es email@test.com" → es-ES (clear Spanish)
+                    - "my email is email@test.com" → en-US (clear English)
+                    - "hello" → es-ES (single word)
+                    - "hello there" → en-US (clear English phrase)
+                    
+                    Previous language en-US:
+                    - "email@test.com" → en-US (standalone email)
+                    - "yes" → en-US (single word)
+                    - "my email is email@test.com" → en-US (clear English)
+                    - "mi correo es email@test.com" → es-ES (clear Spanish)
+                    - "hola" → en-US (single word)
+                    - "hola amigo" → es-ES (clear Spanish phrase)"""
                 },
                 {
                     "role": "user",
@@ -233,10 +217,6 @@ class ChatGPTHelper:
                 "detected_language": previous_language if previous_language else "en-US",
                 "error": str(e)
             }
-
-
-
-
 
 
 
@@ -368,105 +348,200 @@ class ChatGPTHelper:
             }
         
 
-
     def get_companies_suggestions(
-            self,
-            sector: str,
-            geography: str,
-            temperature: float = 0.7
-        ) -> Dict:
-            try:
-                logger.info(f"Generating companies for sector: {sector}, geography: {geography}")
+        self,
+        sector: str,
+        geography: str,
+        preselected_companies: List[str] = None,  # Nuevo parámetro
+        temperature: float = 0.7
+    ) -> Dict:
+        try:
+            logger.info(f"Generating companies for sector: {sector}, geography: {geography}")
+            if preselected_companies:
+                logger.info(f"Including preselected companies: {preselected_companies}")
 
-                # Modificar el prompt para ser más específico con la ubicación
-                messages = [
-                    {
-                        "role": "system",
-                        "content": """You are a professional business analyst that provides accurate lists of companies.
-                        When given a sector and location, provide real companies that operate in that specific location.
-                        If the location is not specific enough or invalid, indicate that in your response."""
-                    },
-                    {
-                        
+            # Modificar el prompt para incluir las empresas preseleccionadas
+            preselected_text = ""
+            if preselected_companies:
+                preselected_text = f"Please include these specific companies first in your suggestions: {', '.join(preselected_companies)}. "
+
+            messages = [
+                {
+                    "role": "system",
+                    "content": """You are a professional business analyst that provides accurate lists of companies.
+                    When given a sector and location, provide real companies that operate in that specific location.
+                    If specific companies are requested, include them first in your response."""
+                },
+                {
                     "role": "user",
-                    "content": f"List exactly 20 real companies in the {sector} sector that have significant operations or presence in {geography}. Provide ONLY the company names separated by commas, without any numbering or enumeration. If     {geography} is not a valid or specific location, please indicate that."
-                    }
-                ]
-
-                response = self.client.chat.completions.create(
-                    model="gpt-4",
-                    messages=messages,
-                    temperature=temperature,
-                    max_tokens=250
-                )
-
-                content = response.choices[0].message.content
-                if content is None or "invalid" in content.lower() or "didn't specify" in content.lower():
-                    logger.info("Invalid or unspecified location")
-                    error_message = f"Please provide a more specific location for {sector} companies."
-                    return {
-                        "success": False,
-                        "error": error_message,
-                        "content": [],
-                        "contentId": str(uuid.uuid4()),
-                        "messages": {
-                            "error": error_message
-                        }
-                    }
-
-                companies_text = content.strip()
-                if not companies_text:
-                    logger.info("Received empty response from API")
-                    error_message = self.get_bot_response('error_no_companies')
-                    return {
-                        "success": True,
-                        "content": [],
-                        "contentId": str(uuid.uuid4()),
-                        "messages": {
-                            "error": error_message
-                        }
-                    }
-
-                companies = [
-                    company.strip()
-                    for company in companies_text.split(',')
-                    if company.strip() and not company.strip().isspace()
-                ]
-
-                if len(companies) < 20:
-                    logger.warning(f"Received only {len(companies)} companies, requesting more")
-                    return self.get_companies_suggestions(sector, geography, temperature)
-
-                logger.info(f"Successfully generated {len(companies)} companies")
-
-                translated_messages = {
-                    "title": self.translate_message(
-                        f"Found {sector} companies in {geography}",
-                        self.current_language
-                    ),
-                    "companies_found": self.get_bot_response("companies_found"),
-                    "from_database": self.get_bot_response("from_database"),
-                    "additional_suggestions": self.get_bot_response("additional_suggestions"),
-                    "search_more": self.get_bot_response("search_more")
+                    "content": f"{preselected_text}List exactly 20 real companies in the {sector} sector that have significant operations or presence in {geography}. If {geography} is not a valid or specific location, please indicate that. Only provide the company names separated by commas, or indicate if the location is invalid."
                 }
+            ]
 
+            response = self.client.chat.completions.create(
+                model="gpt-4",
+                messages=messages,
+                temperature=temperature,
+                max_tokens=250
+            )
+
+            content = response.choices[0].message.content
+            if not content:
+                logger.info("Received empty response from API")
                 return {
                     "success": True,
-                    "content": companies[:20],
-                    "contentId": str(uuid.uuid4()),
-                    "messages": translated_messages,
-                    "detected_language": self.current_language
+                    "content": [],
+                    "contentId": str(uuid.uuid4())
                 }
 
-            except Exception as e:
-                logger.error(f"Error generating companies: {str(e)}")
-                error_message = self.get_bot_response('error_general')
-                return {
-                    "success": False,
-                    "error": error_message,
-                    "contentId": None,
-                    "detected_language": self.current_language
+            companies = [
+                company.strip()
+                for company in content.split(',')
+                if company.strip() and not company.strip().isspace()
+            ]
+
+            # Asegurar que las empresas preseleccionadas estén incluidas
+            if preselected_companies:
+                # Remover duplicados manteniendo el orden
+                final_companies = []
+                # Primero las preseleccionadas
+                for company in preselected_companies:
+                    if company not in final_companies:
+                        final_companies.append(company)
+                # Luego el resto hasta completar 20
+                for company in companies:
+                    if company not in final_companies and len(final_companies) < 20:
+                        final_companies.append(company)
+                companies = final_companies
+
+            logger.info(f"Successfully generated {len(companies)} companies")
+
+            return {
+                "success": True,
+                "content": companies[:20],
+                "contentId": str(uuid.uuid4())
+            }
+
+        except Exception as e:
+            logger.error(f"Error generating companies: {str(e)}")
+            return {
+                "success": False,
+                "error": "An error occurred while generating companies",
+                "contentId": None
+            }
+
+    def get_companies_suggestions(
+        self,
+        sector: str,
+        geography: str,
+        preselected_companies: List[str] = None,
+        excluded_companies: Set[str] = None,  # Añadido parámetro de exclusión
+        temperature: float = 0.7
+    ) -> Dict:
+        try:
+            logger.info(f"Generating companies for sector: {sector}, geography: {geography}")
+            
+            # Filtrar empresas preseleccionadas que estén en la lista de excluidas
+            if preselected_companies and excluded_companies:
+                preselected_companies = [
+                    company for company in preselected_companies
+                    if not any(excluded.lower() in company.lower() for excluded in excluded_companies)
+                ]
+                logger.info(f"Filtered preselected companies: {preselected_companies}")
+
+            # Construir el prompt incluyendo preseleccionadas y excluidas
+            prompt_parts = []
+            if preselected_companies:
+                logger.info(f"Including preselected companies: {preselected_companies}")
+                prompt_parts.append(f"Please include these specific companies first in your suggestions: {', '.join(preselected_companies)}. ")
+            if excluded_companies:
+                logger.info(f"Excluding companies: {excluded_companies}")
+                prompt_parts.append(f"Do not include these companies in your suggestions: {', '.join(excluded_companies)}. ")
+
+            prompt_text = "".join(prompt_parts)
+
+            messages = [
+                {
+                    "role": "system",
+                    "content": """You are a professional business analyst that provides accurate lists of companies.
+                    When given a sector and location, provide real companies that operate in that specific location.
+                    If specific companies are requested, include them first in your response.
+                    If companies are to be excluded, ensure they are not in your suggestions."""
+                },
+                {
+                    "role": "user",
+                    "content": f"{prompt_text}List exactly 20 real companies in the {sector} sector that have significant operations or presence in {geography}. If {geography} is not a valid or specific location, please indicate that. Only provide the company names separated by commas, or indicate if the location is invalid."
                 }
+            ]
+
+            response = self.client.chat.completions.create(
+                model="gpt-4",
+                messages=messages,
+                temperature=temperature,
+                max_tokens=250
+            )
+
+            content = response.choices[0].message.content
+            if not content:
+                logger.info("Received empty response from API")
+                return {
+                    "success": True,
+                    "content": [],
+                    "contentId": str(uuid.uuid4())
+                }
+
+            companies = [
+                company.strip()
+                for company in content.split(',')
+                if company.strip() and not company.strip().isspace()
+            ]
+
+            # Filtrar empresas excluidas
+            if excluded_companies:
+                companies = [
+                    company for company in companies
+                    if not any(excluded.lower() in company.lower() for excluded in excluded_companies)
+                ]
+
+            # Asegurar que las empresas preseleccionadas (ya filtradas) estén incluidas
+            final_companies = []
+            if preselected_companies:
+                # Primero las preseleccionadas
+                for company in preselected_companies:
+                    if company not in final_companies:
+                        final_companies.append(company)
+                # Luego el resto hasta completar 20
+                for company in companies:
+                    if company not in final_companies and len(final_companies) < 20:
+                        final_companies.append(company)
+                companies = final_companies
+
+            logger.info(f"Successfully generated {len(companies)} companies")
+            if preselected_companies:
+                logger.info(f"Included {len(preselected_companies)} preselected companies")
+            if excluded_companies:
+                logger.info(f"Excluded {len(excluded_companies)} companies")
+
+            return {
+                "success": True,
+                "content": companies[:20],
+                "contentId": str(uuid.uuid4())
+            }
+
+        except Exception as e:
+            logger.error(f"Error generating companies: {str(e)}")
+            return {
+                "success": False,
+                "error": "An error occurred while generating companies",
+                "contentId": None
+            }       
+
+
+
+
+
+
+
             
     def process_voice_input(self, audio_file: BinaryIO, step: str = 'transcribe') -> Dict:
         temp_path = None
@@ -1402,29 +1477,42 @@ class ChatGPTHelper:
 
 
 
-
-
-
-
     def get_companies_suggestions(
             self,
             sector: str,
             geography: str,
+            preselected_companies: List[str] = None,
+            excluded_companies: Set[str] = None,
             temperature: float = 0.7
         ) -> Dict:
             try:
                 logger.info(f"Generating companies for sector: {sector}, geography: {geography}")
+
+                # Construir el prompt incluyendo las empresas preseleccionadas y excluidas
+                prompt_parts = []
+                
+                if preselected_companies:
+                    logger.info(f"Including preselected companies: {preselected_companies}")
+                    prompt_parts.append(f"Please include these companies first in your suggestions: {', '.join(preselected_companies)}.")
+                
+                if excluded_companies:
+                    logger.info(f"Excluding companies: {excluded_companies}")
+                    prompt_parts.append(f"Do not include these companies in your suggestions: {', '.join(excluded_companies)}.")
+                
+                custom_instructions = " ".join(prompt_parts)
 
                 messages = [
                     {
                         "role": "system",
                         "content": """You are a professional business analyst that provides accurate lists of companies.
                         When given a sector and location, provide real companies that operate in that specific location.
+                        If specific companies are requested, include them first in your response.
+                        If companies are to be excluded, ensure they are not in your suggestions.
                         If the location is not specific enough or invalid, indicate that in your response."""
                     },
                     {
                         "role": "user",
-                        "content": f"List exactly 20 real companies in the {sector} sector that have significant operations or presence in {geography}. If {geography} is not a valid or specific location, please indicate that. Only provide the company names separated by commas, or indicate if the location is invalid."
+                        "content": f"{custom_instructions} List exactly 20 real companies in the {sector} sector that have significant operations or presence in {geography}. If {geography} is not a valid or specific location, please indicate that. Only provide the company names separated by commas, or indicate if the location is invalid."
                     }
                 ]
 
@@ -1446,39 +1534,52 @@ class ChatGPTHelper:
                         "contentId": str(uuid.uuid4())
                     }
 
-                companies_text = content.strip()
-                if not companies_text:
-                    logger.info("Received empty response from API")
-                    return {
-                        "success": True,
-                        "content": [],
-                        "contentId": str(uuid.uuid4())
-                    }
-
                 companies = [
                     company.strip()
-                    for company in companies_text.split(',')
+                    for company in content.split(',')
                     if company.strip() and not company.strip().isspace()
                 ]
 
+                # Filtrar empresas excluidas
+                if excluded_companies:
+                    companies = [
+                        company for company in companies 
+                        if not any(excluded.lower() in company.lower() for excluded in excluded_companies)
+                    ]
+
+                # Asegurar que las empresas preseleccionadas estén primero
+                if preselected_companies:
+                    final_companies = []
+                    # Primero las preseleccionadas
+                    for company in preselected_companies:
+                        if company not in final_companies:
+                            final_companies.append(company)
+                    # Luego el resto hasta completar 20
+                    for company in companies:
+                        if company not in final_companies and len(final_companies) < 20:
+                            final_companies.append(company)
+                    companies = final_companies
+
                 if len(companies) < 20:
                     logger.warning(f"Received only {len(companies)} companies, requesting more")
-                    return self.get_companies_suggestions(sector, geography, temperature)
+                    return self.get_companies_suggestions(
+                        sector, 
+                        geography, 
+                        preselected_companies,
+                        excluded_companies,
+                        temperature
+                    )
 
                 logger.info(f"Successfully generated {len(companies)} companies")
-
-                translated_messages = {
-                    "title": self.translate_message(
-                        f"Found {sector} companies in {geography}",
-                        self.current_language
-                    )
-                }
+                if preselected_companies:
+                    logger.info(f"Included {len(preselected_companies)} preselected companies")
+                if excluded_companies:
+                    logger.info(f"Excluded {len(excluded_companies)} companies")
 
                 return {
                     "success": True,
                     "content": companies[:20],
                     "contentId": str(uuid.uuid4()),
-                    "messages": translated_messages,
                     "detected_language": self.current_language
                 }
 
@@ -1490,8 +1591,6 @@ class ChatGPTHelper:
                     "contentId": None,
                     "detected_language": self.current_language
                 }
-
-
 
 
 
@@ -1674,4 +1773,186 @@ class ChatGPTHelper:
                 "correction_applied": False,
                 "error": str(e),
                 "corrected_email": email
+            }
+        
+
+
+
+
+    def get_client_side_companies(
+        self,
+        sector: str,
+        geography: str,
+        excluded_companies: Set[str] = None,  # Añadir parámetro de exclusión
+        temperature: float = 0.7
+    ) -> Dict:
+        try:
+            logger.info(f"Generating client-side companies for sector: {sector}, geography: {geography}")
+            if excluded_companies:
+                logger.info(f"Excluding companies: {excluded_companies}")
+
+            # Modificar el prompt para incluir exclusiones
+            exclusion_text = ""
+            if excluded_companies:
+                exclusion_text = f" Do not include these companies: {', '.join(excluded_companies)}."
+
+            messages = [
+                {
+                    "role": "system",
+                    "content": """You are a professional business analyst that provides accurate lists of companies.
+                    When given a sector and location, provide real companies that are CLIENTS or USERS of that industry's services.
+                    For the financial services sector, think of large corporations, retailers, and industrial companies that USE financial services."""
+                },
+                {
+                    "role": "user",
+                    "content": f"""List exactly 15 major companies in {geography} that are CLIENTS of the {sector} industry.{exclusion_text}
+                    For financial services, provide large corporate clients that use banking, investment, and financial services.
+                    Examples:
+                    - Major retailers (e.g., Carrefour, Tesco)
+                    - Industrial companies (e.g., Siemens, Volkswagen)
+                    - Technology companies (e.g., SAP, Nokia)
+                    - Consumer goods companies (e.g., Nestlé, Unilever)
+                    
+                    Only provide company names separated by commas, focusing on well-known, large corporations in {geography} that USE financial services."""
+                }
+            ]
+
+            response = self.client.chat.completions.create(
+                model="gpt-4",
+                messages=messages,
+                temperature=temperature,
+                max_tokens=250
+            )
+
+            content = response.choices[0].message.content
+            if not content:
+                logger.info("Received empty response from API")
+                return {
+                    "success": True,
+                    "content": [],
+                    "contentId": str(uuid.uuid4())
+                }
+
+            companies = [
+                company.strip()
+                for company in content.split(',')
+                if company.strip() and not company.strip().isspace()
+            ]
+
+            # Filtrar empresas excluidas
+            if excluded_companies:
+                companies = [
+                    company for company in companies
+                    if not any(excluded.lower() in company.lower() for excluded in excluded_companies)
+                ]
+                logger.info(f"Filtered out excluded companies, {len(companies)} remaining")
+
+            logger.info(f"Successfully generated {len(companies)} client-side companies")
+
+            return {
+                "success": True,
+                "content": companies[:15],
+                "contentId": str(uuid.uuid4())
+            }
+
+        except Exception as e:
+            logger.error(f"Error generating client-side companies: {str(e)}")
+            return {
+                "success": False,
+                "error": "An error occurred while generating companies",
+                "contentId": None
+            }
+        
+
+
+
+    def get_supply_chain_companies(
+        self,
+        sector: str,
+        geography: str,
+        excluded_companies: Set[str] = None,  # Añadir parámetro de exclusión
+        temperature: float = 0.7
+    ) -> Dict:
+        try:
+            logger.info(f"Generating supply chain companies for sector: {sector}, geography: {geography}")
+            if excluded_companies:
+                logger.info(f"Excluding companies: {excluded_companies}")
+
+            # Modificar el prompt para incluir exclusiones
+            exclusion_text = ""
+            if excluded_companies:
+                exclusion_text = f" Do not include these companies: {', '.join(excluded_companies)}."
+
+            messages = [
+                {
+                    "role": "system",
+                    "content": """You are a professional business analyst that provides accurate lists of companies.
+                    When given a sector and location, provide real companies that are SUPPLIERS or SERVICE PROVIDERS to that industry.
+                    These are companies that PROVIDE technology, infrastructure, or essential services to the main players in that sector."""
+                },
+                {
+                    "role": "user",
+                    "content": f"""List exactly 15 companies that are on the SUPPLY SIDE of the {sector} industry in {geography}.{exclusion_text}
+                    For financial services, provide companies that supply:
+                    - Financial technology (trading platforms, payment systems)
+                    - Data and analytics providers
+                    - Infrastructure and security solutions
+                    - Risk management systems
+                    - Core banking software
+                    
+                    Examples for financial services:
+                    - Bloomberg (market data and analytics)
+                    - Temenos (banking software)
+                    - FIS Global (financial technology)
+                    - Finastra (financial software)
+                    - Refinitiv (financial data)
+                    
+                    Only provide company names separated by commas, focusing on well-known, verifiable companies in {geography}."""
+                }
+            ]
+
+            response = self.client.chat.completions.create(
+                model="gpt-4",
+                messages=messages,
+                temperature=temperature,
+                max_tokens=250
+            )
+
+            content = response.choices[0].message.content
+            if not content:
+                logger.info("Received empty response from API")
+                return {
+                    "success": True,
+                    "content": [],
+                    "contentId": str(uuid.uuid4())
+                }
+
+            companies = [
+                company.strip()
+                for company in content.split(',')
+                if company.strip() and not company.strip().isspace()
+            ]
+
+            # Filtrar empresas excluidas
+            if excluded_companies:
+                companies = [
+                    company for company in companies
+                    if not any(excluded.lower() in company.lower() for excluded in excluded_companies)
+                ]
+                logger.info(f"Filtered out excluded companies, {len(companies)} remaining")
+
+            logger.info(f"Successfully generated {len(companies)} supply chain companies")
+
+            return {
+                "success": True,
+                "content": companies[:15],
+                "contentId": str(uuid.uuid4())
+            }
+
+        except Exception as e:
+            logger.error(f"Error generating supply chain companies: {str(e)}")
+            return {
+                "success": False,
+                "error": "An error occurred while generating companies",
+                "contentId": None
             }

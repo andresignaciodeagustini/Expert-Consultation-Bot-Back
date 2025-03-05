@@ -11,19 +11,19 @@ def update_env_file(new_token):
     # Actualiza la línea del token
     with open('.env', 'w') as file:
         for line in lines:
-            if line.startswith('ZOHO_ACCESS_TOKEN='):
-                file.write(f'ZOHO_ACCESS_TOKEN={new_token}\n')
+            if line.startswith('ZOHO_RECRUIT_ACCESS_TOKEN='):
+                file.write(f'ZOHO_RECRUIT_ACCESS_TOKEN={new_token}\n')
             else:
                 file.write(line)
 
 def refresh_token():
-    print("\n=== Zoho Token Refresh Process ===")
+    print("\n=== Zoho Recruit Token Refresh Process ===")
     
     # Cargar variables actuales
     load_dotenv()
     client_id = os.getenv('ZOHO_CLIENT_ID')
     client_secret = os.getenv('ZOHO_CLIENT_SECRET')
-    refresh_token = os.getenv('ZOHO_REFRESH_TOKEN')
+    refresh_token = os.getenv('ZOHO_RECRUIT_REFRESH_TOKEN')
     
     print("1. Verificando credenciales...")
     print(f"Client ID: {client_id[:10]}..." if client_id else "Client ID: Missing")
@@ -37,7 +37,8 @@ def refresh_token():
         'refresh_token': refresh_token,
         'client_id': client_id,
         'client_secret': client_secret,
-        'grant_type': 'refresh_token'
+        'grant_type': 'refresh_token',
+        'scope': 'ZohoRecruit.modules.ALL'
     }
     
     response = requests.post(refresh_url, params=params)
@@ -51,7 +52,7 @@ def refresh_token():
         
         # Verificar el nuevo token
         print("\n4. Verificando nuevo token...")
-        test_url = "https://www.zohoapis.com/crm/v2/Accounts"
+        test_url = "https://recruit.zoho.com/recruit/v2/Candidates"
         headers = {
             'Authorization': f'Zoho-oauthtoken {new_token}'
         }
