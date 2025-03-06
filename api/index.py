@@ -1718,7 +1718,7 @@ def evaluation_questions():
 
         BASE_MESSAGES = {
             'ask_preference': "Would you like to add evaluation questions for the project?",
-            'confirmed_yes': "Excellent! Please provide your evaluation questions for the project.",
+            'confirmed_yes': "Excellent!",
             'confirmed_no': "Understood. We will proceed without evaluation questions.",
             'processing_error': "An error occurred while processing your request.",
             'invalid_response': "Could not determine your preference. Please answer yes or no."
@@ -1791,9 +1791,6 @@ def evaluation_questions():
 
 
 
-
-
-
 @app.route('/api/evaluation-questions-sections', methods=['POST'])
 def evaluation_questions_sections():
     try:
@@ -1821,21 +1818,39 @@ def evaluation_questions_sections():
         selected_categories = data.get('selected_categories', {})
         current_category = data.get('current_category')
         answer = data.get('answer')
+        client_perspective = data.get('clientPerspective', False)
+        supply_chain_perspective = data.get('supplyChainPerspective', False)
 
         print(f"Processing - Current Category: {current_category}")
         print(f"Current Questions State: {current_questions}")
         print(f"Selected Categories: {selected_categories}")
+        print(f"Client Perspective: {client_perspective}")
+        print(f"Supply Chain Perspective: {supply_chain_perspective}")
 
         if current_category and answer:
             print(f"Saving answer for {current_category}")
             current_questions[current_category] = answer
 
+        # Determinar categorías pendientes basado en las respuestas del usuario
         pending_categories = []
-        for category in ['main', 'client', 'supply_chain']:
-            if selected_categories.get(category, False) and category not in current_questions:
-                pending_categories.append(category)
+        
+        # Siempre incluir 'main' si está seleccionado y no tiene respuesta
+        if selected_categories.get('main', False) and 'main' not in current_questions:
+            pending_categories.append('main')
+        
+        # Incluir 'client' solo si está seleccionado, no tiene respuesta y el usuario mostró interés
+        if (selected_categories.get('client', False) and 
+            'client' not in current_questions and 
+            client_perspective):
+            pending_categories.append('client')
+        
+        # Incluir 'supply_chain' solo si está seleccionado, no tiene respuesta y el usuario mostró interés
+        if (selected_categories.get('supply_chain', False) and 
+            'supply_chain' not in current_questions and 
+            supply_chain_perspective):
+            pending_categories.append('supply_chain')
 
-        print(f"Pending categories: {pending_categories}")
+        print(f"Pending categories after filtering: {pending_categories}")
 
         category_messages = {
             'main': "Please provide screening questions for main companies in the sector.",
@@ -1876,6 +1891,7 @@ def evaluation_questions_sections():
             'error': str(e),
             'detected_language': detected_language if 'detected_language' in locals() else 'en'
         }), 500
+
 
 @app.route('/api/save-evaluation', methods=['POST'])
 def save_evaluation():
@@ -2230,12 +2246,12 @@ def select_experts():
                 }
                 expert_responses.append(expert_response)
 
-            # Obtener preguntas específicas para la categoría
-            category_questions = {}
-            for found_expert in found_experts:
-                category = found_expert['category']
-                if category not in category_questions:
-                    category_questions[category] = evaluation_questions.get(category, [])
+            # MODIFICACIÓN: Usar directamente todas las preguntas de evaluación disponibles
+            category_questions = evaluation_questions.copy()
+
+            print("\n=== Evaluation Questions Debug ===")
+            print(f"Original evaluation questions: {evaluation_questions}")
+            print(f"Category questions being sent: {category_questions}")
 
             selection_message = chatgpt.translate_message(
                 BASE_MESSAGES['expert_selected'],
