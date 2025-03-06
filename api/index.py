@@ -1987,8 +1987,6 @@ def get_evaluation(project_id):
 
 
 
-
-
 @app.route('/api/industry-experts', methods=['POST'])
 def industry_experts():
     try:
@@ -2009,7 +2007,14 @@ def industry_experts():
         BASE_MESSAGES = {
             'invalid_client_perspective': 'clientPerspective must be a boolean value or empty string',
             'missing_required_fields': 'Missing required fields: sector and region',
-            'processing_error': 'An error occurred while processing your request.'
+            'processing_error': 'An error occurred while processing your request.',
+            'experts_found_title': 'Experts Found',
+            'main_experts_title': 'Main Company Experts',
+            'client_experts_title': 'Client Company Experts',
+            'supply_chain_experts_title': 'Supply Chain Experts',
+            'selection_instructions': 'Please select an expert by entering their name exactly as it appears in the list.',
+            'selection_example': 'For example: "{expert_name}"',
+            'selection_prompt': 'Which expert would you like to select?'
         }
         
         # Validar datos requeridos
@@ -2148,6 +2153,19 @@ def industry_experts():
             cat['total_found'] for cat in final_response['experts'].values()
         )
 
+        # Traducir mensajes
+        translated_messages = {
+            'experts_found_title': chatgpt.translate_message(BASE_MESSAGES['experts_found_title'], detected_language),
+            'main_experts_title': chatgpt.translate_message(BASE_MESSAGES['main_experts_title'], detected_language),
+            'client_experts_title': chatgpt.translate_message(BASE_MESSAGES['client_experts_title'], detected_language),
+            'supply_chain_experts_title': chatgpt.translate_message(BASE_MESSAGES['supply_chain_experts_title'], detected_language),
+            'selection_instructions': chatgpt.translate_message(BASE_MESSAGES['selection_instructions'], detected_language),
+            'selection_example': chatgpt.translate_message(BASE_MESSAGES['selection_example'], detected_language),
+            'selection_prompt': chatgpt.translate_message(BASE_MESSAGES['selection_prompt'], detected_language)
+        }
+
+        final_response['messages'] = translated_messages
+
         print("\n=== Final Response Statistics ===")
         print(f"Total experts shown: {final_response['total_experts_shown']}")
         print(f"Total experts found: {final_response['total_experts_found']}")
@@ -2167,7 +2185,6 @@ def industry_experts():
             'message': error_message,
             'error': str(e)
         }), 500
-    
 
 
 
