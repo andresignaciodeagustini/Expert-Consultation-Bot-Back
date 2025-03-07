@@ -2,16 +2,16 @@ from openai import OpenAI
 import logging
 import uuid
 import re
-from typing import Dict, List, Any, Set
+from typing import Dict, List, Any, Set, BinaryIO
 import os
 from dotenv import load_dotenv
-from typing import BinaryIO
 import tempfile
 from pathlib import Path
 from unidecode import unidecode
-import requests  
+import requests
+import importlib.util
+import sys
 from ..utils.config import VALID_SECTORS
-
 
 BOT_MESSAGES = {
     "region_prompt": "I've identified the region as {}. Please specify the business sector.",
@@ -34,6 +34,30 @@ API_ENDPOINTS = {
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+def import_username_processor():
+    """Función auxiliar para importar UsernameProcessor de manera segura"""
+    try:
+        # Intenta primero la importación directa
+        from src.handlers.username_processor import UsernameProcessor
+        return UsernameProcessor
+    except ImportError:
+        try:
+            # Si falla, intenta con path relativo
+            base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            processor_path = os.path.join(base_path, "handlers", "username_processor.py")
+            
+            if not os.path.exists(processor_path):
+                logger.error(f"Username processor not found at: {processor_path}")
+                return None
+                
+            spec = importlib.util.spec_from_file_location("username_processor", processor_path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            return module.UsernameProcessor
+        except Exception as e:
+            logger.error(f"Failed to import UsernameProcessor: {str(e)}")
+            return None
+
 class ChatGPTHelper:
     def __init__(self):
         load_dotenv()
@@ -48,6 +72,16 @@ class ChatGPTHelper:
 
         try:
             self.client = OpenAI(api_key=self.api_key)
+            
+            # Inicializar UsernameProcessor
+            UsernameProcessor = import_username_processor()
+            if UsernameProcessor:
+                self.username_processor = UsernameProcessor()
+                logger.info("UsernameProcessor initialized successfully")
+            else:
+                logger.warning("UsernameProcessor not available, using fallback processing")
+                self.username_processor = None
+            
             self.test_connection()
             logger.info("ChatGPT Helper initialized successfully")
         except Exception as e:
@@ -67,6 +101,8 @@ class ChatGPTHelper:
         except Exception as e:
             logger.error(f"Connection test failed: {str(e)}")
             raise
+
+
 
     def detected_language_from_content(self, text: str) -> str:
         try:
@@ -667,203 +703,101 @@ class ChatGPTHelper:
                     print(f"Temp file removed: {temp_path}")
                 except Exception as e:
                     print(f"Error removing temp file: {str(e)}")
-    
+
+
+
     def process_username(self, text: str) -> str:
+        # Diccionario de transliteración ruso-latino
+        russian_to_latin = {
+            'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'д': 'd', 'е': 'e', 'ё': 'yo',
+            'ж': 'zh', 'з': 'z', 'и': 'i', 'й': 'y', 'к': 'k', 'л': 'l', 'м': 'm',
+            'н': 'n', 'о': 'o', 'п': 'p', 'р': 'r', 'с': 's', 'т': 't', 'у': 'u',
+            'ф': 'f', 'х': 'h', 'ц': 'ts', 'ч': 'ch', 'ш': 'sh', 'щ': 'sch',
+            'ъ': '', 'ы': 'y', 'ь': '', 'э': 'e', 'ю': 'yu', 'я': 'ya',
+            'А': 'a', 'Б': 'b', 'В': 'v', 'Г': 'g', 'Д': 'd', 'Е': 'e', 'Ё': 'yo',
+            'Ж': 'zh', 'З': 'z', 'И': 'i', 'Й': 'y', 'К': 'k', 'Л': 'l', 'М': 'm',
+            'Н': 'n', 'О': 'o', 'П': 'p', 'Р': 'r', 'С': 's', 'Т': 't', 'У': 'u',
+            'Ф': 'f', 'Х': 'h', 'Ц': 'ts', 'Ч': 'ch', 'Ш': 'sh', 'Щ': 'sch',
+            'Ъ': '', 'Ы': 'y', 'Ь': '', 'Э': 'e', 'Ю': 'yu', 'Я': 'ya'
+        }
+
+        def transliterate_russian(text: str) -> str:
+            """Convierte texto cirílico a caracteres latinos"""
+            result = ""
+            for char in text:
+                result += russian_to_latin.get(char, char)
+            return result.lower()  # Convertir todo a minúsculas
+
+        def clean_username(username: str) -> str:
+            """Limpia y formatea el nombre de usuario"""
+            # Convertir a minúsculas y eliminar espacios extras
+            cleaned = username.lower().strip()
+            # Reemplazar espacios con guiones bajos
+            cleaned = "_".join(cleaned.split())
+            # Eliminar caracteres no permitidos
+            cleaned = ''.join(c for c in cleaned if c.isalnum() or c in '_.-')
+            return cleaned
+
         try:
-            # Primero, eliminar el punto final si existe
-            text = text.rstrip('.')
-            
-            system_prompt = """
-            Eres un procesador especializado en nombres de usuario que sigue reglas ABSOLUTAS de formateo.
-
-            REGLA FUNDAMENTAL PARA PALABRAS DE INSTRUCCIÓN EN FRANCÉS:
-            - "souligne" es SIEMPRE una instrucción para usar "_", NUNCA es parte del nombre
-            - "point" o "points" es SIEMPRE una instrucción para usar ".", NUNCA es parte del nombre
-            - "tiret" es SIEMPRE una instrucción para usar "-", NUNCA es parte del nombre
-
-            EJEMPLO CRÍTICO DE INSTRUCCIÓN VS NOMBRE:
-            Input: "Claire souligne Bernard.33"
-            ❌ MAL: "claire.souligny-bernard.33" (interpretó "souligne" como parte del nombre)
-            ✅ BIEN: "claire_bernard.33" ("souligne" indica usar "_" entre nombres)
-
-            EJEMPLOS ESPECÍFICOS PARA PORTUGUÉS:
-            Input: "Ana Sublinhado Ferreira ponto 63"
-            ❌ MAL: "ana.sublinhado.ferreira63" (interpretó "sublinhado" como parte del nombre)
-            ✅ BIEN: "ana_ferreira.63" ("sublinhado" indica usar "_" entre nombres)
-
-            Input: "João ponto Silva sublinhado 25"
-            ❌ MAL: "joão.silva_25" (mantuvo caracteres especiales)
-            ✅ BIEN: "joao.silva_25" (convertido a ASCII)
-
-            Input: "Carlos ponto Costa sublinhado hífen 91"
-            ❌ MAL: "carlos.costa_hifen91" (interpretó "hífen" como parte del nombre)
-            ✅ BIEN: "carlos.costa-91" ("hífen" indica usar "-")
-
-            REGLAS DE PROCESAMIENTO DE INSTRUCCIONES:
-            1. Cuando escuches "souligne":
-            - SIEMPRE reemplazar por "_"
-            - NUNCA tratarlo como parte del nombre
-            - Usar el "_" para conectar las palabras adyacentes
-
-            2. Cuando escuches "point":
-            - SIEMPRE reemplazar por "."
-            - NUNCA tratarlo como parte del nombre
-            - Usar el "." para conectar las palabras adyacentes
-
-            3. Cuando escuches "tiret":
-            - SIEMPRE reemplazar por "-"
-            - NUNCA tratarlo como parte del nombre
-            - Usar el "-" para conectar las palabras adyacentes
-            
-            REGLA FUNDAMENTAL DE PRESERVACIÓN:
-            - La estructura de puntuación del texto original es SAGRADA
-            - Cada punto (.), guión (-) o subrayado (_) que existe en la entrada DEBE mantenerse EXACTAMENTE igual
-            - NUNCA convertir puntos en guiones o viceversa
-            - La única modificación permitida es: convertir a minúsculas y eliminar espacios
-
-            REGLA ABSOLUTA DE NOMBRES:
-            - NUNCA truncar nombres
-            - NUNCA modificar la longitud de los nombres
-            - NUNCA eliminar letras de los nombres
-            - Convertir a minúsculas pero mantener TODAS las letras
-            - Preservar la integridad completa del nombre
-
-            EJEMPLOS DE ERRORES REALES CORREGIDOS:
-
-            1. ERROR DE INTERPRETACIÓN DE INSTRUCCIONES:
-            Input: "Pierre point souligne Martin 45"
-            ❌ MAL: "pierre.point_souligne.martin45" (interpretó instrucciones como nombres)
-            ✅ BIEN: "pierre_martin45" (usó instrucciones como símbolos)
-
-            2. ERROR DE TRUNCAMIENTO DE NOMBRES:
-            Input: "Marie-Leclerc 98"
-            ❌ MAL: "mari-leclerc98" (truncó el nombre)
-            ✅ BIEN: "marie-leclerc98" (mantuvo nombre completo)
-
-            3. ERROR DE PALABRAS DE INSTRUCCIÓN:
-            Input: "Pierre Points souligne Dupont 45"
-            ❌ MAL: "pierre.points_souligne_dupont45" (mantuvo palabras de instrucción)
-            ✅ BIEN: "pierre_dupont45" (reemplazó instrucciones por símbolos)
-
-            4. ERROR DE MODIFICACIÓN DE SÍMBOLOS:
-            Input: "sophie.martin__22"
-            ❌ MAL: "sophie_martin_22" (cambió el punto por underscore)
-            ✅ BIEN: "sophie.martin_22" (mantuvo el punto original)
-
-            5. ERROR DE SÍMBOLOS CON NÚMEROS:
-            Input: "Thomas point Martin 45"
-            ❌ MAL: "thomas.martin_45" (añadió underscore antes del número)
-            ✅ BIEN: "thomas.martin45" (número concatenado directamente)
-
-            REGLAS CRÍTICAS ACTUALIZADAS:
-            1. Procesamiento de Instrucciones:
-            - SIEMPRE interpretar "souligne", "point", "tiret" como instrucciones
-            - NUNCA incluirlas como parte del nombre
-            - Usar sus símbolos correspondientes para conectar palabras
-
-            2. Procesamiento de Nombres:
-            - NUNCA truncar nombres
-            - NUNCA eliminar letras
-            - NUNCA modificar longitud de palabras
-            - Mantener TODAS las letras al convertir a minúsculas
-
-            3. Puntuación Original:
-            - NUNCA cambiar un punto (.) por otro símbolo
-            - NUNCA cambiar un guión (-) por otro símbolo
-            - NUNCA cambiar un underscore (_) por otro símbolo
-            - Mantener EXACTAMENTE los símbolos originales
-
-            4. Números:
-            - SIEMPRE concatenar directamente
-            - NUNCA añadir símbolos antes o después
-            - NUNCA separar números del texto
-
-            PROCESAMIENTO PARA OTROS IDIOMAS:
-            Russian:
-            - "нижнее подчеркивание" → "_"
-            - "точка" → "."
-            - "тире/дефис" → "-"
-
-            Japanese:
-            - "アンダースコア/アンダーバー" → "_"
-            - "ドット/テン" → "."
-            - "ハイフン/マイナス" → "-"
-
-            Italian:
-            - "underscore/sottolineatura/underline" → "_"
-            - "punto" → "."
-            - "trattino/lineetta" → "-"
-
-            Portuguese:
-            - "sublinhado/underline" → "_"
-            - "ponto" → "."
-            - "hífen/traço" → "-"
-
-            German:
-            - "unterstrich" → "_"
-            - "punkt" → "."
-            - "bindestrich/strich" → "-"
-
-            Spanish:
-            - "guion bajo/subrayado" → "_"
-            - "punto" → "."
-            - "guion/raya" → "-"
-
-            English:
-            - "underscore" → "_"
-            - "dot/point" → "."
-            - "dash/hyphen" → "-"
-
-            VERIFICACIÓN FINAL OBLIGATORIA:
-            1. ¿Se interpretaron correctamente las palabras de instrucción?
-            2. ¿Se mantuvieron TODAS las letras de los nombres reales?
-            3. ¿Se reemplazaron TODAS las palabras de instrucción por símbolos?
-            4. ¿Se mantuvieron EXACTAMENTE los símbolos originales?
-            5. ¿Se cambiaron puntos por guiones o viceversa? (ERROR)
-            6. ¿Se añadieron símbolos antes de números? (ERROR)
-            7. ¿Se añadieron símbolos no solicitados? (ERROR)
-            8. ¿Hay símbolos duplicados? (ERROR)
-            9. ¿Todo está en minúsculas?
-            10. ¿Se interpretó correctamente "souligne" como instrucción?
-
-            RECORDATORIO VITAL:
-            - "souligne", "point", "tiret" son SIEMPRE instrucciones
-            - NUNCA interpretar palabras de instrucción como nombres
-            - NUNCA truncar o modificar nombres reales
-            - NUNCA modificar símbolos existentes
-            - NUNCA añadir símbolos antes de números
-            - NUNCA añadir símbolos no solicitados
-            - SOLO convertir a minúsculas y aplicar instrucciones
-            - Mantener EXACTAMENTE la puntuación original
-            """
-
+            # Primer paso: Procesamiento con GPT-4
+            print(f"\nProcesando username con GPT-4: {text}")
             response = self.client.chat.completions.create(
                 model="gpt-4",
                 messages=[
                     {
                         "role": "system",
-                        "content": system_prompt
+                        "content": "Procesa el nombre de usuario manteniendo solo letras, números y los símbolos permitidos (punto, guion bajo). Elimina palabras que describan símbolos."
                     },
                     {
                         "role": "user",
-                        "content": f"Procesa este nombre manteniendo la puntuación exacta: {text}"
+                        "content": f"Procesa este nombre: {text}"
                     }
                 ],
                 temperature=0.1
             )
 
-            processed_names = response.choices[0].message.content.strip().lower()
-            # Convertir caracteres especiales a ASCII y mantener puntuación
-            processed_names = unidecode(processed_names)
-            # Solo eliminar espacios, mantener toda otra puntuación
-            processed_names = processed_names.replace(" ", "")
-            print(f"Converted username: {processed_names}")
-            return processed_names
+            # Obtener y procesar la respuesta
+            processed_text = response.choices[0].message.content.strip()
+            
+            # Transliterar si contiene caracteres cirílicos
+            if any(char in russian_to_latin for char in processed_text):
+                processed_text = transliterate_russian(processed_text)
+            
+            # Limpiar y formatear el nombre de usuario
+            final_username = clean_username(processed_text)
+            
+            print(f"Resultado final: {final_username}")
+
+            # Verificar palabras prohibidas
+            prohibited_words = [
+                'punto', 'point', 'dot', 'ponto', 'punkt',
+                'guion', 'hyphen', 'dash', 'tiret', 'hífen',
+                'underscore', 'souligne', 'sublinhado',
+                'arroba', 'at', 'arobase'
+            ]
+
+            if any(word in final_username for word in prohibited_words):
+                raise ValueError(f"Palabra prohibida encontrada en el resultado")
+
+            return final_username
 
         except Exception as e:
-            print(f"Error processing username: {str(e)}")
-            return text
-
+            print(f"Error en process_username: {str(e)}")
+            try:
+                # Procesamiento de respaldo
+                if any(char in russian_to_latin for char in text):
+                    backup_processed = transliterate_russian(text)
+                else:
+                    backup_processed = text
+                
+                final_backup = clean_username(backup_processed)
+                print(f"Resultado de respaldo: {final_backup}")
+                return final_backup
+                
+            except Exception as backup_error:
+                print(f"Error en procesamiento de respaldo: {str(backup_error)}")
+                # Último recurso: devolver el texto original limpio
+                return clean_username(text)
 
 
     def process_sector_input(self, audio_file: BinaryIO, previous_region: str) -> Dict:
