@@ -189,94 +189,204 @@ def get_welcome_message():
     try:
         global LAST_DETECTED_LANGUAGE
         print("\n=== Welcome Message Request Details ===")
-        print("Headers:", dict(request.headers))
-        print("IP:", request.remote_addr)
-        print("X-Forwarded-For:", request.headers.get('X-Forwarded-For'))
-        print("CF-IPCountry:", request.headers.get('CF-IPCountry'))
-        print("X-Real-IP:", request.headers.get('X-Real-IP'))
         
-        # Primera opción: Usar header CF-IPCountry si está disponible
-        country_code = request.headers.get('CF-IPCountry')
-        if country_code:
-            print(f"Country detected from CF-IPCountry header: {country_code}")
-        else:
-            # Primera opción: ipapi.co
+        # Obtener la primera IP del header X-Forwarded-For
+        forwarded_ips = request.headers.get('X-Forwarded-For', '')
+        client_ip = forwarded_ips.split(',')[0].strip() if forwarded_ips else request.remote_addr
+        
+        print("Headers:", dict(request.headers))
+        print("Original X-Forwarded-For:", forwarded_ips)
+        print("Extracted client IP:", client_ip)
+        
+        # Primera opción: ipapi.co
+        try:
+            print("Attempting primary IP detection (ipapi.co)...")
+            response = requests.get(f'https://ipapi.co/{client_ip}/json/', timeout=5)
+            data = response.json()
+            
+            if 'error' in data:
+                raise Exception(f"ipapi.co error: {data.get('reason', 'Unknown error')}")
+                
+            country_code = data.get('country_code', 'US')
+            print(f"Successfully detected country from ipapi.co: {country_code}")
+            
+        except Exception as primary_error:
+            print(f"Primary IP detection failed: {str(primary_error)}")
+            
+            # Segunda opción: ip-api.com
             try:
-                print("Attempting primary IP detection (ipapi.co)...")
-                client_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
-                print(f"Using client IP: {client_ip}")
-                response = requests.get(f'https://ipapi.co/{client_ip}/json/', timeout=5)
+                print("Attempting secondary IP detection (ip-api.com)...")
+                response = requests.get(f'http://ip-api.com/json/{client_ip}', timeout=5)
                 data = response.json()
                 
-                if 'error' in data:
-                    raise Exception(f"ipapi.co error: {data.get('reason', 'Unknown error')}")
+                if data.get('status') == 'success':
+                    country_code = data.get('countryCode', 'US')
+                    print(f"Successfully detected country from ip-api.com: {country_code}")
+                else:
+                    raise Exception("ip-api.com detection failed")
                     
-                country_code = data.get('country_code', 'US')
-                print(f"Successfully detected country from ipapi.co: {country_code}")
+            except Exception as secondary_error:
+                print(f"Secondary IP detection failed: {str(secondary_error)}")
                 
-            except Exception as primary_error:
-                print(f"Primary IP detection failed: {str(primary_error)}")
-                
-                # Segunda opción: ip-api.com
+                # Tercera opción: ipinfo.io
                 try:
-                    print("Attempting secondary IP detection (ip-api.com)...")
-                    response = requests.get('http://ip-api.com/json/', timeout=5)
+                    print("Attempting tertiary IP detection (ipinfo.io)...")
+                    token = os.getenv('IPINFO_TOKEN', 'fallback_token')
+                    response = requests.get(f'https://ipinfo.io/{client_ip}/json?token={token}', timeout=5)
                     data = response.json()
+                    country_code = data.get('country', 'US')
+                    print(f"Successfully detected country from ipinfo.io: {country_code}")
                     
-                    if data.get('status') == 'success':
-                        country_code = data.get('countryCode', 'US')
-                        print(f"Successfully detected country from ip-api.com: {country_code}")
-                    else:
-                        raise Exception("ip-api.com detection failed")
-                        
-                except Exception as secondary_error:
-                    print(f"Secondary IP detection failed: {str(secondary_error)}")
-                    
-                    # Tercera opción: ipinfo.io
-                    try:
-                        print("Attempting tertiary IP detection (ipinfo.io)...")
-                        token = os.getenv('IPINFO_TOKEN', 'fallback_token')
-                        response = requests.get(f'https://ipinfo.io/json?token={token}', timeout=5)
-                        data = response.json()
-                        country_code = data.get('country', 'US')
-                        print(f"Successfully detected country from ipinfo.io: {country_code}")
-                        
-                    except Exception as tertiary_error:
-                        print(f"All IP detection methods failed. Using default US")
-                        country_code = 'US'
+                except Exception as tertiary_error:
+                    print(f"All IP detection methods failed. Using default US")
+                    country_code = 'US'
 
         print(f"Final detected Country Code: {country_code}")
 
-        # Mapeo extensivo de países a códigos de idioma
-        language_map = {
-            # Español (es)
-            'AR': 'es', 'BO': 'es', 'CL': 'es', 'CO': 'es', 'CR': 'es',
-            'CU': 'es', 'DO': 'es', 'EC': 'es', 'SV': 'es', 'GQ': 'es',
-            'GT': 'es', 'HN': 'es', 'MX': 'es', 'NI': 'es', 'PA': 'es',
-            'PY': 'es', 'PE': 'es', 'PR': 'es', 'ES': 'es', 'UY': 'es',
-            'VE': 'es',
+        # Definición del mapeo de idiomas por región y país
+        language_mapping = {
+            # Asia y Pacífico
+            'JP': 'japanese',
+            'CN': 'chinese',
+            'KR': 'korean',
+            'TW': 'chinese',
+            'HK': 'chinese',
+            'MO': 'chinese',
+            'SG': 'english',
+            'MY': 'english',
+            'ID': 'english',
+            'TH': 'thai',
+            'VN': 'vietnamese',
+            'PH': 'english',
+            'MM': 'english',
+            'KH': 'english',
+            'LA': 'english',
+            'BN': 'english',
+            'IN': 'english',
+            'PK': 'english',
+            'BD': 'english',
+            'LK': 'english',
+            'NP': 'english',
+            'BT': 'english',
+            'MV': 'english',
+            'AU': 'english',
+            'NZ': 'english',
+            'PG': 'english',
+            'FJ': 'english',
+            'SB': 'english',
+            'VU': 'english',
+            'NC': 'french',
+            'PF': 'french',
+                        # Europa
+            'GB': 'english',
+            'FR': 'french',
+            'DE': 'german',
+            'IT': 'italian',
+            'ES': 'spanish',
+            'PT': 'portuguese',
+            'IE': 'english',
+            'BE': 'french',
+            'NL': 'dutch',
+            'LU': 'french',
+            'CH': 'german',
+            'AT': 'german',
+            'SE': 'swedish',
+            'NO': 'norwegian',
+            'DK': 'danish',
+            'FI': 'finnish',
+            'IS': 'english',
+            'PL': 'polish',
+            'RO': 'romanian',
+            'CZ': 'czech',
+            'HU': 'hungarian',
+            'BG': 'english',
+            'SK': 'english',
+            'HR': 'english',
+            'RS': 'english',
+            'UA': 'english',
+            'BY': 'russian',
+            'MD': 'romanian',
+            'GR': 'greek',
+            'TR': 'turkish',
 
-            # Inglés (en)
-            'US': 'en', 'GB': 'en', 'CA': 'en', 'AU': 'en', 'NZ': 'en',
-            'IE': 'en', 'ZA': 'en', 'JM': 'en', 'BZ': 'en', 'TT': 'en',
-            'GY': 'en', 'AG': 'en', 'BS': 'en', 'BB': 'en',
+            # América
+            'US': 'english',
+            'CA': 'english',
+            'MX': 'spanish',
+            'GT': 'spanish',
+            'BZ': 'english',
+            'HN': 'spanish',
+            'SV': 'spanish',
+            'NI': 'spanish',
+            'CR': 'spanish',
+            'PA': 'spanish',
+            'CU': 'spanish',
+            'DO': 'spanish',
+            'PR': 'spanish',
+            'JM': 'english',
+            'HT': 'french',
+            'BS': 'english',
+            'BB': 'english',
+            'TT': 'english',
+            'BR': 'portuguese',
+            'AR': 'spanish',
+            'CO': 'spanish',
+            'PE': 'spanish',
+            'VE': 'spanish',
+            'CL': 'spanish',
+            'EC': 'spanish',
+            'BO': 'spanish',
+            'PY': 'spanish',
+            'UY': 'spanish',
+            'GY': 'english',
+            'SR': 'dutch',
+            'GF': 'french',
 
-            # Francés (fr)
-            'FR': 'fr', 'CA-FR': 'fr', 'BE': 'fr', 'CH': 'fr', 'MC': 'fr',
-            'LU': 'fr', 'SN': 'fr', 'CI': 'fr', 'ML': 'fr', 'BF': 'fr',
-            'NE': 'fr', 'TG': 'fr', 'BJ': 'fr', 'GA': 'fr', 'CG': 'fr',
-            'MG': 'fr', 'CM': 'fr', 'DZ': 'fr', 'TN': 'fr', 'MA': 'fr',
+            # África y Medio Oriente
+            'SA': 'arabic',
+            'AE': 'arabic',
+            'QA': 'arabic',
+            'KW': 'arabic',
+            'BH': 'arabic',
+            'OM': 'arabic',
+            'JO': 'arabic',
+            'IL': 'hebrew',
+            'IQ': 'arabic',
+            'IR': 'persian',
+            'YE': 'arabic',
+            'EG': 'arabic',
+            'MA': 'arabic',
+            'DZ': 'arabic',
+            'TN': 'arabic',
+            'LY': 'arabic',
+            'ZA': 'english',
+            'NG': 'english',
+            'KE': 'english',
+            'ET': 'english',
+            'GH': 'english',
+            'CI': 'french',
+            'CM': 'french',
+            'UG': 'english',
+            'TZ': 'english',
+            'SN': 'french',
+            'AO': 'portuguese',
+            'MZ': 'portuguese',
+            'ZW': 'english',
+            'RW': 'english',
+            'NA': 'english',
+            'BW': 'english',
+            'MU': 'english',
+            'SC': 'english'
         }
 
-        # Obtener el código de idioma correcto
-        target_language = language_map.get(country_code, 'en')
-        print(f"Mapped language code: {target_language}")
-
-        # Actualizar el idioma global
+        # Obtener el idioma basado en el código de país
+        target_language = language_mapping.get(country_code, 'english')
+        print(f"Mapped language: {target_language}")
+                # Actualizar el idioma global detectado
         LAST_DETECTED_LANGUAGE = target_language
         print(f"Updated LAST_DETECTED_LANGUAGE to: {LAST_DETECTED_LANGUAGE}")
 
-        # Mensajes de bienvenida base en inglés con el nombre de la compañía protegido
+        # Definición de mensajes de bienvenida base
         welcome_messages = {
             "greeting": {
                 "text": "Welcome to Silverlight Research Expert Network! I'm here to help you find the perfect expert for your needs.",
@@ -285,10 +395,11 @@ def get_welcome_message():
             "instruction": "To get started, please provide your email address."
         }
 
+        # Inicializar el helper de ChatGPT para traducciones
         chatgpt = ChatGPTHelper()
         
-        # Si no es inglés, incluir ambas versiones
-        if target_language != 'en':
+        # Preparar los mensajes traducidos si el idioma no es inglés
+        if target_language != 'english':
             print(f"Translating messages to language: {target_language}")
             translated_messages = {
                 "greeting": {
@@ -300,7 +411,10 @@ def get_welcome_message():
                 },
                 "instruction": {
                     "english": welcome_messages["instruction"],
-                    "translated": chatgpt.translate_message(welcome_messages["instruction"], target_language)
+                    "translated": chatgpt.translate_message(
+                        welcome_messages["instruction"], 
+                        target_language
+                    )
                 }
             }
         else:
@@ -314,73 +428,94 @@ def get_welcome_message():
                 }
             }
         
+        # Preparar la respuesta final
         response_data = {
             'success': True,
             'detected_language': target_language,
             'messages': translated_messages,
             'country_code': country_code,
-            'is_english_speaking': target_language == 'en',
+            'is_english_speaking': target_language == 'english',
             'detection_method': 'primary' if 'primary_error' not in locals() else 
                               'secondary' if 'secondary_error' not in locals() else 
                               'tertiary' if 'tertiary_error' not in locals() else 'default'
         }
         
+        # Registrar la respuesta final
         print("\n=== Welcome Message Response ===")
         print(f"Sending response: {response_data}")
         
         return jsonify(response_data)
 
-    except Exception as e:
+    except Exception as error:
+        # Manejo de errores
         print("\n=== Welcome Message Error ===")
-        print(f"Error type: {type(e)}")
-        print(f"Error details: {str(e)}")
-        print(f"Error location: {e.__traceback__.tb_lineno}")
+        print(f"Error type: {type(error)}")
+        print(f"Error details: {str(error)}")
+        print(f"Error location: {error.__traceback__.tb_lineno}")
         
+        # Preparar mensaje de error
         error_message = "Error generating welcome message"
         if 'chatgpt' in locals():
             error_message = chatgpt.translate_message(
                 error_message,
-                LAST_DETECTED_LANGUAGE if LAST_DETECTED_LANGUAGE else 'en'
+                LAST_DETECTED_LANGUAGE if LAST_DETECTED_LANGUAGE else 'english'
             )
         
+        # Devolver respuesta de error
         return jsonify({
             'success': False,
             'error': error_message,
-            'detected_language': 'en'
+            'detected_language': 'english'
         }), 500
 
-# Nueva ruta para pruebas de detección
+
+
 @app.route('/api/test-detection')
 def test_detection():
     try:
-        # Recopilar información de headers
-        headers_info = dict(request.headers)
+        # Obtener la primera IP del header X-Forwarded-For
+        forwarded_ips = request.headers.get('X-Forwarded-For', '')
+        client_ip = forwarded_ips.split(',')[0].strip() if forwarded_ips else request.remote_addr
         
-        # Intentar detección con ipapi.co
-        client_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
-        ipapi_result = None
+        print(f"Original X-Forwarded-For: {forwarded_ips}")
+        print(f"Extracted client IP: {client_ip}")
+
+        # Intentar detección con todos los servicios
+        detection_results = {}
+
+        # ipapi.co
         try:
             response = requests.get(f'https://ipapi.co/{client_ip}/json/', timeout=5)
-            ipapi_result = response.json()
+            detection_results['ipapi'] = response.json()
         except Exception as e:
-            ipapi_result = {"error": str(e)}
+            detection_results['ipapi'] = {"error": str(e)}
+
+        # ip-api.com
+        try:
+            response = requests.get(f'http://ip-api.com/json/{client_ip}', timeout=5)
+            detection_results['ip_api'] = response.json()
+        except Exception as e:
+            detection_results['ip_api'] = {"error": str(e)}
+
+        # ipinfo.io
+        try:
+            token = os.getenv('IPINFO_TOKEN', 'fallback_token')
+            response = requests.get(f'https://ipinfo.io/{client_ip}/json?token={token}', timeout=5)
+            detection_results['ipinfo'] = response.json()
+        except Exception as e:
+            detection_results['ipinfo'] = {"error": str(e)}
 
         return jsonify({
-            'request_headers': headers_info,
-            'remote_addr': request.remote_addr,
-            'x_forwarded_for': request.headers.get('X-Forwarded-For'),
-            'cf_country': request.headers.get('CF-IPCountry'),
-            'x_real_ip': request.headers.get('X-Real-IP'),
-            'ipapi_detection': ipapi_result,
-            'client_ip_used': client_ip
+            'original_forwarded_for': forwarded_ips,
+            'extracted_client_ip': client_ip,
+            'detection_results': detection_results,
+            'request_headers': dict(request.headers)
         })
     except Exception as e:
         return jsonify({
             'error': str(e),
             'type': str(type(e))
         }), 500
-   
-
 
 
 
