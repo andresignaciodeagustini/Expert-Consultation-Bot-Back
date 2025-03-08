@@ -76,40 +76,21 @@ test_tokens()
 # Inicialización de Flask
 app = Flask(__name__)
 
-# Lista de orígenes permitidos
-ALLOWED_ORIGINS = [
-    "https://expert-consultation-bot-front.vercel.app",
-    "https://expert-consultation-bot-front-i0r29638j.vercel.app",
-    "https://expert-consultation-bot-front2.onrender.com",
-    "https://expert-consultation-bot-front.onrender.com",
-    "http://localhost:5173",
-    "http://127.0.0.1:8080"
-]
-
-# Configuración de CORS
+# Configuración CORS simplificada
 CORS(app, resources={
     r"/*": {
-        "origins": ALLOWED_ORIGINS,
-        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        "allow_headers": [
-            "Content-Type", 
-            "Authorization",
-            "Accept",
-            "Origin"
-        ],
-        "supports_credentials": True
+        "origins": ["https://expert-consultation-bot-front.vercel.app"],
+        "methods": ["GET", "POST", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization"],
+        "supports_credentials": False
     }
 })
 
-# Manejo de CORS para cada respuesta
 @app.after_request
 def after_request(response):
-    origin = request.headers.get('Origin')
-    if origin in ALLOWED_ORIGINS:
-        response.headers.add('Access-Control-Allow-Origin', origin)
-        response.headers.add('Access-Control-Allow-Credentials', 'true')
-        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,Accept,Origin')
-        response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+    response.headers.add('Access-Control-Allow-Origin', 'https://expert-consultation-bot-front.vercel.app')
+    response.headers.add('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
     return response
 
 # Registro de blueprints
