@@ -93,15 +93,8 @@ def after_request(response):
     response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
     return response
 
-# Registro de blueprints
-app.register_blueprint(voice_routes, url_prefix='/api/ai/voice')
-
-print("\n=== Initializing Services ===")
-zoho_service = ZohoService()
-voice_handler = VoiceHandler()
-chatgpt = ChatGPTHelper()
-# Registro de blueprints
-app.register_blueprint(voice_routes, url_prefix='/api/ai/voice')
+# Registro de blueprint (una sola vez)
+app.register_blueprint(voice_routes, url_prefix='/api/ai/voice', name='voice_routes_main')
 
 print("\n=== Initializing Services ===")
 zoho_service = ZohoService()
