@@ -184,57 +184,66 @@ def refresh_token():
 ###################################################################################################
 ######################################FASE 1 !!!!!!!!!!
 
-
-
 @app.route('/api/welcome-message', methods=['GET'])
 def get_welcome_message():
     try:
         global LAST_DETECTED_LANGUAGE
-        print("\n=== Welcome Message Endpoint Started ===")
-        print(f"Previous detected language: {LAST_DETECTED_LANGUAGE}")
+        print("\n=== Welcome Message Request Details ===")
+        print("Headers:", dict(request.headers))
+        print("IP:", request.remote_addr)
+        print("X-Forwarded-For:", request.headers.get('X-Forwarded-For'))
+        print("CF-IPCountry:", request.headers.get('CF-IPCountry'))
+        print("X-Real-IP:", request.headers.get('X-Real-IP'))
         
-        # Primera opción: ipapi.co
-        try:
-            print("Attempting primary IP detection (ipapi.co)...")
-            response = requests.get('https://ipapi.co/json/', timeout=5)
-            data = response.json()
-            
-            if 'error' in data:
-                raise Exception(f"ipapi.co error: {data.get('reason', 'Unknown error')}")
-                
-            country_code = data.get('country_code', 'US')
-            print(f"Successfully detected country from ipapi.co: {country_code}")
-            
-        except Exception as primary_error:
-            print(f"Primary IP detection failed: {str(primary_error)}")
-            
-            # Segunda opción: ip-api.com
+        # Primera opción: Usar header CF-IPCountry si está disponible
+        country_code = request.headers.get('CF-IPCountry')
+        if country_code:
+            print(f"Country detected from CF-IPCountry header: {country_code}")
+        else:
+            # Primera opción: ipapi.co
             try:
-                print("Attempting secondary IP detection (ip-api.com)...")
-                response = requests.get('http://ip-api.com/json/', timeout=5)
+                print("Attempting primary IP detection (ipapi.co)...")
+                client_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
+                print(f"Using client IP: {client_ip}")
+                response = requests.get(f'https://ipapi.co/{client_ip}/json/', timeout=5)
                 data = response.json()
                 
-                if data.get('status') == 'success':
-                    country_code = data.get('countryCode', 'US')
-                    print(f"Successfully detected country from ip-api.com: {country_code}")
-                else:
-                    raise Exception("ip-api.com detection failed")
+                if 'error' in data:
+                    raise Exception(f"ipapi.co error: {data.get('reason', 'Unknown error')}")
                     
-            except Exception as secondary_error:
-                print(f"Secondary IP detection failed: {str(secondary_error)}")
+                country_code = data.get('country_code', 'US')
+                print(f"Successfully detected country from ipapi.co: {country_code}")
                 
-                # Tercera opción: ipinfo.io
+            except Exception as primary_error:
+                print(f"Primary IP detection failed: {str(primary_error)}")
+                
+                # Segunda opción: ip-api.com
                 try:
-                    print("Attempting tertiary IP detection (ipinfo.io)...")
-                    token = os.getenv('IPINFO_TOKEN', 'fallback_token')
-                    response = requests.get(f'https://ipinfo.io/json?token={token}', timeout=5)
+                    print("Attempting secondary IP detection (ip-api.com)...")
+                    response = requests.get('http://ip-api.com/json/', timeout=5)
                     data = response.json()
-                    country_code = data.get('country', 'US')
-                    print(f"Successfully detected country from ipinfo.io: {country_code}")
                     
-                except Exception as tertiary_error:
-                    print(f"All IP detection methods failed. Using default US")
-                    country_code = 'US'
+                    if data.get('status') == 'success':
+                        country_code = data.get('countryCode', 'US')
+                        print(f"Successfully detected country from ip-api.com: {country_code}")
+                    else:
+                        raise Exception("ip-api.com detection failed")
+                        
+                except Exception as secondary_error:
+                    print(f"Secondary IP detection failed: {str(secondary_error)}")
+                    
+                    # Tercera opción: ipinfo.io
+                    try:
+                        print("Attempting tertiary IP detection (ipinfo.io)...")
+                        token = os.getenv('IPINFO_TOKEN', 'fallback_token')
+                        response = requests.get(f'https://ipinfo.io/json?token={token}', timeout=5)
+                        data = response.json()
+                        country_code = data.get('country', 'US')
+                        print(f"Successfully detected country from ipinfo.io: {country_code}")
+                        
+                    except Exception as tertiary_error:
+                        print(f"All IP detection methods failed. Using default US")
+                        country_code = 'US'
 
         print(f"Final detected Country Code: {country_code}")
 
@@ -257,8 +266,6 @@ def get_welcome_message():
             'LU': 'fr', 'SN': 'fr', 'CI': 'fr', 'ML': 'fr', 'BF': 'fr',
             'NE': 'fr', 'TG': 'fr', 'BJ': 'fr', 'GA': 'fr', 'CG': 'fr',
             'MG': 'fr', 'CM': 'fr', 'DZ': 'fr', 'TN': 'fr', 'MA': 'fr',
-
-            # [Resto del mapeo de idiomas igual...]
         }
 
         # Obtener el código de idioma correcto
@@ -340,6 +347,37 @@ def get_welcome_message():
             'success': False,
             'error': error_message,
             'detected_language': 'en'
+        }), 500
+
+# Nueva ruta para pruebas de detección
+@app.route('/api/test-detection')
+def test_detection():
+    try:
+        # Recopilar información de headers
+        headers_info = dict(request.headers)
+        
+        # Intentar detección con ipapi.co
+        client_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
+        ipapi_result = None
+        try:
+            response = requests.get(f'https://ipapi.co/{client_ip}/json/', timeout=5)
+            ipapi_result = response.json()
+        except Exception as e:
+            ipapi_result = {"error": str(e)}
+
+        return jsonify({
+            'request_headers': headers_info,
+            'remote_addr': request.remote_addr,
+            'x_forwarded_for': request.headers.get('X-Forwarded-For'),
+            'cf_country': request.headers.get('CF-IPCountry'),
+            'x_real_ip': request.headers.get('X-Real-IP'),
+            'ipapi_detection': ipapi_result,
+            'client_ip_used': client_ip
+        })
+    except Exception as e:
+        return jsonify({
+            'error': str(e),
+            'type': str(type(e))
         }), 500
    
 
