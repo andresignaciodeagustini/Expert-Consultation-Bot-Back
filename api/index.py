@@ -75,52 +75,50 @@ test_tokens()
 
 # Inicialización de Flask
 app = Flask(__name__)
+
+# Lista de orígenes permitidos
+ALLOWED_ORIGINS = [
+    "https://expert-consultation-bot-front.vercel.app",
+    "https://expert-consultation-bot-front-i0r29638j.vercel.app",
+    "https://expert-consultation-bot-front2.onrender.com",
+    "https://expert-consultation-bot-front.onrender.com",
+    "http://localhost:5173",
+    "http://127.0.0.1:8080"
+]
+
 # Configuración de CORS
 CORS(app, resources={
     r"/*": {
-        "origins": [
-            # Vercel URLs
-            "https://expert-consultation-bot-front.vercel.app",
-            "https://expert-consultation-bot-front-i0r29638j.vercel.app",
-            "https://expert-consultation-bot-back-oxed.vercel.app",
-            "https://expert-consultation-bot-back-oxed-len508dx6.vercel.app",
-            
-            # Render URLs
-            "https://expert-consultation-bot-front.onrender.com",
-            "https://expert-consultation-bot-back-2.onrender.com",
-            
-            # Heroku URL
-            "https://expert-consultation-bot-back-ab9540834110.herokuapp.com",
-            
-            # Development URLs
-            "http://localhost:5173",
-            "http://127.0.0.1:8080"
-        ],
+        "origins": ALLOWED_ORIGINS,
         "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         "allow_headers": [
             "Content-Type", 
             "Authorization",
-            "Access-Control-Allow-Origin",
-            "Access-Control-Allow-Headers",
-            "Access-Control-Allow-Methods",
-            "Access-Control-Allow-Credentials"
-        ],
-        "expose_headers": [
-            "Content-Type", 
-            "Authorization",
-            "Access-Control-Allow-Origin"
+            "Accept",
+            "Origin"
         ],
         "supports_credentials": True
     }
 })
 
-# Añade esto después de la configuración CORS
+# Manejo de CORS para cada respuesta
 @app.after_request
 def after_request(response):
-    response.headers.add('Access-Control-Allow-Origin', '*')
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
-    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+    origin = request.headers.get('Origin')
+    if origin in ALLOWED_ORIGINS:
+        response.headers.add('Access-Control-Allow-Origin', origin)
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,Accept,Origin')
+        response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
     return response
+
+# Registro de blueprints
+app.register_blueprint(voice_routes, url_prefix='/api/ai/voice')
+
+print("\n=== Initializing Services ===")
+zoho_service = ZohoService()
+voice_handler = VoiceHandler()
+chatgpt = ChatGPTHelper()
 # Registro de blueprints
 app.register_blueprint(voice_routes, url_prefix='/api/ai/voice')
 
