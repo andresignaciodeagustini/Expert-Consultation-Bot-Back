@@ -75,20 +75,23 @@ test_tokens()
 
 # Inicialización de Flask
 app = Flask(__name__)
-
 # Configuración de CORS
 CORS(app, resources={
     r"/*": {
         "origins": [
+            # Vercel URLs
             "https://expert-consultation-bot-front.vercel.app",
-            "https://expert-consultation-bot-front-isej4yvne.vercel.app",
+            "https://expert-consultation-bot-front-i0r29638j.vercel.app",
+            "https://expert-consultation-bot-back-oxed.vercel.app",
+            "https://expert-consultation-bot-back-oxed-len508dx6.vercel.app",
+            
+            # Render URLs
+            "https://expert-consultation-bot-front.onrender.com",
+            "https://expert-consultation-bot-back-2.onrender.com",
+            
+            # Development URLs
             "http://localhost:5173",
-            "http://localhost:5174",
-            "http://localhost:3000",
-            "https://expert-consultation-bot-front2.onrender.com",
-            "http://127.0.0.1:5173",
-            "https://expert-consultation-bot-back.vercel.app",
-            "https://expert-consultation-bot-back-2.onrender.com"
+            "http://127.0.0.1:8080"
         ],
         "methods": ["GET", "POST", "OPTIONS"],
         "allow_headers": ["Content-Type", "Authorization"],
@@ -96,7 +99,6 @@ CORS(app, resources={
         "supports_credentials": True
     }
 })
-
 # Registro de blueprints
 app.register_blueprint(voice_routes, url_prefix='/api/ai/voice')
 
