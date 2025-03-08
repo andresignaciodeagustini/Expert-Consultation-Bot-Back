@@ -89,16 +89,38 @@ CORS(app, resources={
             "https://expert-consultation-bot-front.onrender.com",
             "https://expert-consultation-bot-back-2.onrender.com",
             
+            # Heroku URL
+            "https://expert-consultation-bot-back-ab9540834110.herokuapp.com",
+            
             # Development URLs
             "http://localhost:5173",
             "http://127.0.0.1:8080"
         ],
-        "methods": ["GET", "POST", "OPTIONS"],
-        "allow_headers": ["Content-Type", "Authorization"],
-        "expose_headers": ["Content-Type", "Authorization"],
+        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        "allow_headers": [
+            "Content-Type", 
+            "Authorization",
+            "Access-Control-Allow-Origin",
+            "Access-Control-Allow-Headers",
+            "Access-Control-Allow-Methods",
+            "Access-Control-Allow-Credentials"
+        ],
+        "expose_headers": [
+            "Content-Type", 
+            "Authorization",
+            "Access-Control-Allow-Origin"
+        ],
         "supports_credentials": True
     }
 })
+
+# Añade esto después de la configuración CORS
+@app.after_request
+def after_request(response):
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+    return response
 # Registro de blueprints
 app.register_blueprint(voice_routes, url_prefix='/api/ai/voice')
 
