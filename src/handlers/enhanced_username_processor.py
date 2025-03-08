@@ -1,8 +1,10 @@
 from typing import Dict, List, Optional, Any
 import logging
-from .username_processor import UsernameProcessor
-from .enhanced_language_configs import NEW_LANGUAGE_PATTERNS, NEW_LANGUAGE_SETTINGS
 import re
+import unicodedata
+from .username_processor import UsernameProcessor
+from .enhanced_language_configs import NEW_LANGUAGE_PATTERNS, NEW_LANGUAGE_SETTINGS, INTERNATIONAL_TLDS
+import idna
 from unidecode import unidecode
 
 logger = logging.getLogger(__name__)
@@ -18,6 +20,7 @@ class EnhancedUsernameProcessor(UsernameProcessor):
         # Agregar las nuevas configuraciones
         self.new_language_patterns = NEW_LANGUAGE_PATTERNS
         self.new_language_settings = NEW_LANGUAGE_SETTINGS
+        self.international_tlds = INTERNATIONAL_TLDS
         
         # Combinar patrones existentes con nuevos
         self.language_patterns.update(self.new_language_patterns)
@@ -36,43 +39,89 @@ class EnhancedUsernameProcessor(UsernameProcessor):
             'hu', 'tr', 'uk', 'ro', 'bg', 'hr', 'sk', 'sl'
         ])
 
-    def _detect_language_enhanced(self, text: str) -> str:
+    def process_username_enhanced(self, text: str, detected_lang: str = None) -> Dict:
         """
-        Versión mejorada de detección de idioma que incluye los nuevos idiomas
+        Versión mejorada del procesamiento de nombres de usuario
         """
-        text_lower = text.lower()
+        try:
+            logger.debug(f"Processing enhanced username: {text}")
+            
+            # Detectar idioma si no se proporciona
+            if not detected_lang:
+                detected_lang = self._detect_language_enhanced(text)
+            logger.debug(f"Detected language (enhanced): {detected_lang}")
 
-        # Verificar idiomas RTL primero
-        for lang in self.rtl_languages:
-            pattern = self.new_language_patterns[lang]['pattern']
-            if re.search(pattern, text):
-                return lang
+            # Procesar con GPT-4
+            processed_text = self._process_with_gpt4(text)
+            
+            # Aplicar procesamiento específico según el tipo de idioma
+            if detected_lang in self.rtl_languages:
+                processed_text = self._process_rtl_text(processed_text, detected_lang)
+            elif detected_lang in self.asian_languages:
+                processed_text = self._process_asian_text(processed_text, detected_lang)
+            elif detected_lang in self.european_languages:
+                processed_text = self._process_european_text(processed_text, detected_lang)
+            
+            # Limpiar y formatear
+            final_username = self._clean_username(processed_text)
+            
+            # Validación final
+            if not self._validate_username_format(final_username):
+                return {
+                    'success': False,
+                    'error': 'Invalid username format',
+                    'original': text
+                }
 
-        # Verificar idiomas asiáticos
-        for lang in self.asian_languages:
-            pattern = self.new_language_patterns[lang]['pattern']
-            if re.search(pattern, text):
-                return lang
+            return {
+                'success': True,
+                'username': final_username,
+                'original': text,
+                'detected_language': detected_lang
+            }
 
-        # Verificar idiomas europeos
-        for lang in self.european_languages:
-            pattern = self.new_language_patterns[lang]['pattern']
-            if re.search(pattern, text):
-                return lang
+        except Exception as e:
+            logger.error(f"Error in enhanced username processing: {str(e)}")
+            return {
+                'success': False,
+                'error': str(e),
+                'original': text
+            }
 
-        # Verificar palabras clave en todos los nuevos idiomas
-        for lang, config in self.new_language_patterns.items():
-            if any(keyword in text_lower for keyword in config['keywords']):
-                return lang
-
-        # Si no se encuentra ningún patrón nuevo, usar el detector original
-        return super()._detect_language(text)
+    def _process_with_gpt4(self, text: str) -> str:
+        """
+        Procesa el texto usando GPT-4 con manejo mejorado de respuestas
+        """
+        try:
+            response = self.client.chat.completions.create(
+                model="gpt-4",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "Retorna SOLO el nombre de usuario procesado, sin texto adicional."
+                    },
+                    {
+                        "role": "user",
+                        "content": f"Procesa este nombre: {text}"
+                    }
+                ],
+                temperature=0.1
+            )
+            
+            processed_text = response.choices[0].message.content.strip()
+            # Eliminar cualquier prefijo no deseado
+            if processed_text.startswith("el_nombre_"):
+                processed_text = processed_text.split("es_")[-1]
+            return self._clean_username(processed_text)
+        except Exception as e:
+            logger.error(f"Error in GPT-4 processing: {str(e)}")
+            return text
     def _process_rtl_text(self, text: str, lang: str) -> str:
         """
         Procesa texto para idiomas que se escriben de derecha a izquierda
         """
         try:
-            # Normalizar el texto RTL
+            # Normalizar el texto RTL según el idioma
             if lang == 'ar':  # Árabe
                 text = self._normalize_arabic(text)
             elif lang == 'he':  # Hebreo
@@ -85,6 +134,9 @@ class EnhancedUsernameProcessor(UsernameProcessor):
             
             # Manejar caracteres especiales
             text = self._handle_rtl_special_chars(text, lang)
+            
+            # Asegurar dirección correcta del texto
+            text = self._ensure_rtl_direction(text)
             
             return text
         except Exception as e:
@@ -107,6 +159,11 @@ class EnhancedUsernameProcessor(UsernameProcessor):
             elif lang == 'tl':  # Tagalo
                 text = self._normalize_tagalog(text)
 
+            # Eliminar diacríticos y normalizar espacios
+            text = unicodedata.normalize('NFKD', text)
+            text = ''.join(c for c in text if not unicodedata.combining(c))
+            text = ' '.join(text.split())
+
             return text
         except Exception as e:
             logger.error(f"Error processing Asian text: {str(e)}")
@@ -127,21 +184,59 @@ class EnhancedUsernameProcessor(UsernameProcessor):
             else:  # Otros idiomas europeos
                 text = self._normalize_european(text, lang)
 
+            # Normalización común para todos los idiomas europeos
+            text = text.lower()
+            text = self._remove_diacritics(text)
+            text = self._normalize_spaces(text)
+
             return text
         except Exception as e:
             logger.error(f"Error processing European text: {str(e)}")
             return text
 
+    def _detect_language_enhanced(self, text: str) -> str:
+        """
+        Detección mejorada de idioma con soporte para nuevos idiomas
+        """
+        text_lower = text.lower()
+
+        # Verificar idiomas RTL primero
+        for lang in self.rtl_languages:
+            pattern = self.new_language_patterns[lang]['pattern']
+            if re.search(pattern, text):
+                return lang
+
+        # Verificar idiomas asiáticos
+        for lang in self.asian_languages:
+            pattern = self.new_language_patterns[lang]['pattern']
+            if re.search(pattern, text):
+                return lang
+
+        # Verificar idiomas europeos
+        for lang in self.european_languages:
+            pattern = self.new_language_patterns[lang]['pattern']
+            if re.search(pattern, text):
+                return lang
+
+        # Verificar palabras clave
+        for lang, config in self.new_language_patterns.items():
+            if any(keyword in text_lower for keyword in config['keywords']):
+                return lang
+
+        return 'en'  # Default a inglés si no se detecta ningún idioma específico
     def _normalize_arabic(self, text: str) -> str:
         """
         Normaliza texto árabe
         """
-        # Normalizar alefs y hamzas
         normalization_map = {
-            'أ': 'ا', 'إ': 'ا', 'آ': 'ا',
-            'ة': 'ه',
-            'ى': 'ي',
-            'ؤ': 'و'
+            'أ': 'ا', 'إ': 'ا', 'آ': 'ا',  # Variantes de Alef
+            'ة': 'ه',  # Taa Marbutah a Haa
+            'ى': 'ي',  # Alef Maksura a Yaa
+            'ؤ': 'و',  # Waw Hamza a Waw
+            'ئ': 'ي',  # Yaa Hamza a Yaa
+            'ء': '',   # Eliminar Hamza independiente
+            '٠': '0', '١': '1', '٢': '2', '٣': '3', '٤': '4',
+            '٥': '5', '٦': '6', '٧': '7', '٨': '8', '٩': '9'
         }
         for original, normalized in normalization_map.items():
             text = text.replace(original, normalized)
@@ -151,101 +246,34 @@ class EnhancedUsernameProcessor(UsernameProcessor):
         """
         Normaliza texto hebreo
         """
-        # Normalizar caracteres finales
-        final_chars = {
-            'ך': 'כ', 'ם': 'מ', 'ן': 'נ',
-            'ף': 'פ', 'ץ': 'צ'
+        hebrew_map = {
+            'ך': 'כ',  # Final Kaf a Kaf
+            'ם': 'מ',  # Final Mem a Mem
+            'ן': 'נ',  # Final Nun a Nun
+            'ף': 'פ',  # Final Pe a Pe
+            'ץ': 'צ',  # Final Tsadi a Tsadi
+            'ײ': 'יי', # Double Yod
+            'װ': 'וו', # Double Vav
+            'ױ': 'וי'  # Vav Yod
         }
-        for final, regular in final_chars.items():
-            text = text.replace(final, regular)
+        for original, normalized in hebrew_map.items():
+            text = text.replace(original, normalized)
         return text
 
     def _normalize_persian(self, text: str) -> str:
         """
         Normaliza texto persa
         """
-        # Normalizar caracteres persas específicos
         persian_map = {
-            'ك': 'ک',
-            'ي': 'ی',
-            'أ': 'ا',
-            'إ': 'ا',
-            'ۀ': 'ه'
+            'ك': 'ک',  # Arabic Kaf a Persian Kaf
+            'ي': 'ی',  # Arabic Yeh a Persian Yeh
+            'أ': 'ا',  # Alef con Hamza arriba a Alef
+            'إ': 'ا',  # Alef con Hamza abajo a Alef
+            'ۀ': 'ه',  # Heh con Yeh arriba a Heh
+            '۰': '0', '۱': '1', '۲': '2', '۳': '3', '۴': '4',
+            '۵': '5', '۶': '6', '۷': '7', '۸': '8', '۹': '9'
         }
         for original, normalized in persian_map.items():
-            text = text.replace(original, normalized)
-        return text
-    def _normalize_devanagari(self, text: str) -> str:
-        """
-        Normaliza texto en hindi (devanagari)
-        """
-        # Mapa de normalización para hindi
-        devanagari_map = {
-            'ऩ': 'न', 'ऱ': 'र', 'ऴ': 'ळ',
-            'क़': 'क', 'ख़': 'ख', 'ग़': 'ग',
-            'ज़': 'ज', 'ड़': 'ड', 'ढ़': 'ढ',
-            'फ़': 'फ', 'य़': 'य'
-        }
-        for original, normalized in devanagari_map.items():
-            text = text.replace(original, normalized)
-        return text
-
-    def _normalize_thai(self, text: str) -> str:
-        """
-        Normaliza texto tailandés
-        """
-        # Normalizar tonos y diacríticos
-        tone_marks = ['่', '้', '๊', '๋', '์']
-        for mark in tone_marks:
-            text = text.replace(mark, '')
-        return text
-
-    def _normalize_vietnamese(self, text: str) -> str:
-        """
-        Normaliza texto vietnamita
-        """
-        vietnamese_map = {
-            'à': 'a', 'á': 'a', 'ạ': 'a', 'ả': 'a', 'ã': 'a',
-            'â': 'a', 'ầ': 'a', 'ấ': 'a', 'ậ': 'a', 'ẩ': 'a', 'ẫ': 'a',
-            'ă': 'a', 'ằ': 'a', 'ắ': 'a', 'ặ': 'a', 'ẳ': 'a', 'ẵ': 'a',
-            'è': 'e', 'é': 'e', 'ẹ': 'e', 'ẻ': 'e', 'ẽ': 'e',
-            'ê': 'e', 'ề': 'e', 'ế': 'e', 'ệ': 'e', 'ể': 'e', 'ễ': 'e',
-            'ì': 'i', 'í': 'i', 'ị': 'i', 'ỉ': 'i', 'ĩ': 'i',
-            'ò': 'o', 'ó': 'o', 'ọ': 'o', 'ỏ': 'o', 'õ': 'o',
-            'ô': 'o', 'ồ': 'o', 'ố': 'o', 'ộ': 'o', 'ổ': 'o', 'ỗ': 'o',
-            'ơ': 'o', 'ờ': 'o', 'ớ': 'o', 'ợ': 'o', 'ở': 'o', 'ỡ': 'o',
-            'ù': 'u', 'ú': 'u', 'ụ': 'u', 'ủ': 'u', 'ũ': 'u',
-            'ư': 'u', 'ừ': 'u', 'ứ': 'u', 'ự': 'u', 'ử': 'u', 'ữ': 'u',
-            'ỳ': 'y', 'ý': 'y', 'ỵ': 'y', 'ỷ': 'y', 'ỹ': 'y',
-            'đ': 'd'
-        }
-        for original, normalized in vietnamese_map.items():
-            text = text.replace(original, normalized)
-        return text
-
-    def _normalize_indonesian_malay(self, text: str) -> str:
-        """
-        Normaliza texto indonesio/malayo
-        """
-        # Mapa de normalización para indonesio/malayo
-        indo_malay_map = {
-            'ā': 'a', 'ī': 'i', 'ū': 'u', 'ē': 'e', 'ō': 'o',
-            'Ā': 'A', 'Ī': 'I', 'Ū': 'U', 'Ē': 'E', 'Ō': 'O'
-        }
-        for original, normalized in indo_malay_map.items():
-            text = text.replace(original, normalized)
-        return text
-
-    def _normalize_tagalog(self, text: str) -> str:
-        """
-        Normaliza texto tagalo
-        """
-        tagalog_map = {
-            'ñ': 'n', 'Ñ': 'N',
-            'á': 'a', 'é': 'e', 'í': 'i', 'ó': 'o', 'ú': 'u',
-            'Á': 'A', 'É': 'E', 'Í': 'I', 'Ó': 'O', 'Ú': 'U'
-        }
-        for original, normalized in tagalog_map.items():
             text = text.replace(original, normalized)
         return text
 
@@ -256,11 +284,12 @@ class EnhancedUsernameProcessor(UsernameProcessor):
         greek_map = {
             'ά': 'α', 'έ': 'ε', 'ή': 'η', 'ί': 'ι', 'ό': 'ο', 'ύ': 'υ', 'ώ': 'ω',
             'Ά': 'Α', 'Έ': 'Ε', 'Ή': 'Η', 'Ί': 'Ι', 'Ό': 'Ο', 'Ύ': 'Υ', 'Ώ': 'Ω',
-            'ϊ': 'ι', 'ϋ': 'υ', 'ΐ': 'ι', 'ΰ': 'υ'
+            'ϊ': 'ι', 'ϋ': 'υ', 'ΐ': 'ι', 'ΰ': 'υ',
+            'ς': 'σ'  # Final sigma a sigma regular
         }
         for original, normalized in greek_map.items():
             text = text.replace(original, normalized)
-        return text
+        return text.lower()
 
     def _normalize_cyrillic(self, text: str) -> str:
         """
@@ -275,56 +304,40 @@ class EnhancedUsernameProcessor(UsernameProcessor):
         }
         for original, normalized in cyrillic_map.items():
             text = text.replace(original, normalized)
-        return text
+        return text.lower()
 
     def _normalize_slavic(self, text: str) -> str:
         """
-        Normaliza texto para idiomas eslavos (checo, eslovaco, croata, esloveno)
+        Normaliza texto para idiomas eslavos
         """
         slavic_map = {
-            # Caracteres compartidos
             'á': 'a', 'é': 'e', 'í': 'i', 'ó': 'o', 'ú': 'u',
             'ý': 'y', 'č': 'c', 'ď': 'd', 'ě': 'e', 'ň': 'n',
             'ř': 'r', 'š': 's', 'ť': 't', 'ž': 'z',
-            # Caracteres específicos
             'ĺ': 'l', 'ľ': 'l', 'ŕ': 'r', 'ů': 'u',
-            'ä': 'a', 'ô': 'o',
-            'ć': 'c', 'đ': 'd'
+            'ä': 'a', 'ô': 'o', 'ć': 'c', 'đ': 'd'
         }
         for original, normalized in slavic_map.items():
             text = text.replace(original, normalized)
-        return text
+        return text.lower()
 
-    def _normalize_european(self, text: str, lang: str) -> str:
+    def _remove_diacritics(self, text: str) -> str:
         """
-        Normaliza texto para otros idiomas europeos
+        Elimina diacríticos manteniendo caracteres base
         """
-        european_maps = {
-            'nl': {  # Holandés
-                'ä': 'a', 'ë': 'e', 'ï': 'i', 'ö': 'o', 'ü': 'u',
-                'á': 'a', 'é': 'e', 'í': 'i', 'ó': 'o', 'ú': 'u'
-            },
-            'pl': {  # Polaco
-                'ą': 'a', 'ć': 'c', 'ę': 'e', 'ł': 'l', 'ń': 'n',
-                'ó': 'o', 'ś': 's', 'ź': 'z', 'ż': 'z'
-            },
-            'sv': {  # Sueco
-                'å': 'a', 'ä': 'a', 'ö': 'o'
-            },
-            'no': {  # Noruego
-                'æ': 'ae', 'ø': 'o', 'å': 'a'
-            },
-            'fi': {  # Finlandés
-                'ä': 'a', 'ö': 'o', 'å': 'a'
-            },
-            'da': {  # Danés
-                'æ': 'ae', 'ø': 'o', 'å': 'a'
-            }
-        }
-        
-        if lang in european_maps:
-            for original, normalized in european_maps[lang].items():
-                text = text.replace(original, normalized)
+        return ''.join(c for c in unicodedata.normalize('NFKD', text)
+                      if not unicodedata.combining(c))
+
+    def _normalize_spaces(self, text: str) -> str:
+        """
+        Normaliza espacios y caracteres de separación
+        """
+        # Reemplazar múltiples espacios con uno solo
+        text = ' '.join(text.split())
+        # Reemplazar espacios con guiones bajos
+        text = text.replace(' ', '_')
+        # Eliminar caracteres de control y espacios especiales
+        text = ''.join(char for char in text if char.isprintable())
         return text
 
     def _convert_rtl_numbers(self, text: str) -> str:
@@ -342,54 +355,6 @@ class EnhancedUsernameProcessor(UsernameProcessor):
         for original, western in number_map.items():
             text = text.replace(original, western)
         return text
-
-    def process_username_enhanced(self, text: str, detected_lang: str = None) -> Dict:
-        """
-        Versión mejorada del procesamiento de nombres de usuario
-        """
-        try:
-            logger.debug(f"Processing enhanced username: {text}")
-            
-            # Detectar idioma si no se proporciona
-            if not detected_lang:
-                detected_lang = self._detect_language_enhanced(text)
-            logger.debug(f"Detected language (enhanced): {detected_lang}")
-
-            # Aplicar procesamiento específico según el tipo de idioma
-            if detected_lang in self.rtl_languages:
-                processed_text = self._process_rtl_text(text, detected_lang)
-            elif detected_lang in self.asian_languages:
-                processed_text = self._process_asian_text(text, detected_lang)
-            elif detected_lang in self.european_languages:
-                processed_text = self._process_european_text(text, detected_lang)
-            else:
-                # Usar procesamiento original para otros idiomas
-                return super().process_username(text, detected_lang)
-
-            # Limpieza final y validación
-            final_username = self._clean_username(processed_text)
-            
-            if not self._validate_username_format(final_username):
-                return {
-                    'success': False,
-                    'error': 'Invalid username format',
-                    'original': text
-                }
-
-            return {
-                'success': True,
-                'username': final_username,
-                'original': text,
-                'detected_language': detected_lang
-            }
-
-        except Exception as e:
-            logger.error(f"Error in enhanced username processing: {str(e)}")
-            return {
-                'success': False,
-                'error': str(e),
-                'original': text
-            }
 
     def _handle_rtl_special_chars(self, text: str, lang: str) -> str:
         """
@@ -425,6 +390,18 @@ class EnhancedUsernameProcessor(UsernameProcessor):
                 text = text.replace(original, replacement)
         return text
 
+    def _ensure_rtl_direction(self, text: str) -> str:
+        """
+        Asegura la dirección correcta del texto RTL
+        """
+        # Agregar marcadores de dirección RTL si no están presentes
+        if any(ord(c) >= 0x0591 and ord(c) <= 0x08FF for c in text):
+            if not text.startswith('\u200F'):
+                text = '\u200F' + text
+            if not text.endswith('\u200F'):
+                text = text + '\u200F'
+        return text
+
     def _validate_enhanced_username_format(self, username: str, lang: str) -> bool:
         """
         Validación mejorada de formato de nombre de usuario con consideraciones específicas del idioma
@@ -447,8 +424,23 @@ class EnhancedUsernameProcessor(UsernameProcessor):
             if not self._validate_asian_chars(username, lang):
                 return False
 
-        # Validaciones generales mejoradas
-        if not self._validate_common_requirements(username):
+        # Validaciones generales
+        return self._validate_common_requirements(username)
+    def _validate_common_requirements(self, username: str) -> bool:
+        """
+        Valida requisitos comunes para todos los nombres de usuario
+        """
+        # No permitir caracteres especiales al inicio o final
+        if re.match(r'^[._-]|[._-]$', username):
+            return False
+
+        # No permitir caracteres especiales consecutivos
+        if re.search(r'[._-]{2,}', username):
+            return False
+
+        # Verificar caracteres permitidos
+        allowed_pattern = r'^[\w._-]+$'
+        if not re.match(allowed_pattern, username):
             return False
 
         return True
@@ -465,7 +457,7 @@ class EnhancedUsernameProcessor(UsernameProcessor):
         
         # Permitir números y símbolos especiales
         if has_rtl and has_ltr:
-            # Verificar si la mezcla es válida (por ejemplo, en nombres de usuario técnicos)
+            # Verificar si la mezcla es válida
             valid_mixed_patterns = [
                 r'^[a-zA-Z0-9_.-]+$',  # Patrón occidental estándar
                 r'^[\u0600-\u06FF0-9_.-]+$'  # Patrón árabe/persa estándar
@@ -491,25 +483,6 @@ class EnhancedUsernameProcessor(UsernameProcessor):
             return bool(re.match(valid_patterns[lang], text))
         return True
 
-    def _validate_common_requirements(self, username: str) -> bool:
-        """
-        Valida requisitos comunes para todos los nombres de usuario
-        """
-        # No permitir caracteres especiales al inicio o final
-        if re.match(r'^[._-]|[._-]$', username):
-            return False
-
-        # No permitir caracteres especiales consecutivos
-        if re.search(r'[._-]{2,}', username):
-            return False
-
-        # Verificar caracteres permitidos
-        allowed_pattern = r'^[\w._-]+$'
-        if not re.match(allowed_pattern, username):
-            return False
-
-        return True
-
     def get_language_info(self, text: str) -> Dict:
         """
         Obtiene información detallada sobre el idioma detectado
@@ -532,6 +505,7 @@ class EnhancedUsernameProcessor(UsernameProcessor):
         language_info['supported_features'] = self._get_supported_features(detected_lang)
         
         return language_info
+
     def _get_asian_script(self, lang: str) -> str:
         """
         Determina el sistema de escritura para idiomas asiáticos
@@ -567,85 +541,3 @@ class EnhancedUsernameProcessor(UsernameProcessor):
             ])
             
         return features
-
-    def suggest_username_alternatives(self, text: str, lang: str) -> List[str]:
-        """
-        Sugiere alternativas para nombres de usuario basadas en el idioma
-        """
-        suggestions = []
-        base_text = self._clean_text(text)
-
-        # Variante transliterada
-        if lang in self.rtl_languages or lang in self.asian_languages:
-            transliterated = self._transliterate_text(base_text, lang)
-            suggestions.append(transliterated)
-
-        # Variante con números
-        if len(base_text) > 3:
-            suggestions.append(f"{base_text}123")
-            suggestions.append(f"{base_text}01")
-
-        # Variante con guiones bajos
-        if ' ' in text:
-            underscored = text.replace(' ', '_').lower()
-            suggestions.append(underscored)
-
-        # Variante con punto
-        if len(base_text) > 3:
-            parts = base_text.split()
-            if len(parts) > 1:
-                suggestions.append('.'.join(parts).lower())
-
-        return list(set(suggestions))[:5]  # Eliminar duplicados y limitar a 5 sugerencias
-
-    def validate_full_email_enhanced(self, email: str) -> Dict:
-        """
-        Validación mejorada de email completo con soporte multilingüe
-        """
-        try:
-            if '@' not in email:
-                return {
-                    'success': False,
-                    'error': 'Email must contain @',
-                    'original': email
-                }
-
-            username, domain = email.split('@')
-            
-            # Detectar idiomas
-            username_lang = self._detect_language_enhanced(username)
-            domain_lang = self._detect_language_enhanced(domain)
-
-            # Procesar username con el nuevo procesador
-            username_result = self.process_username_enhanced(username, username_lang)
-            if not username_result['success']:
-                return username_result
-
-            # Procesar domain
-            domain_result = self.process_domain(domain, domain_lang)
-            if not domain_result['success']:
-                return {
-                    'success': False,
-                    'error': domain_result['error'],
-                    'username': username_result['username'],
-                    'domain': domain_result.get('processed_domain', ''),
-                    'suggestions': domain_result.get('suggestions', [])
-                }
-
-            return {
-                'success': True,
-                'email': f"{username_result['username']}@{domain_result['domain']}",
-                'username': username_result['username'],
-                'domain': domain_result['domain'],
-                'username_language': username_lang,
-                'domain_language': domain_lang,
-                'original': email
-            }
-
-        except Exception as e:
-            logger.error(f"Error in enhanced email validation: {str(e)}")
-            return {
-                'success': False,
-                'error': str(e),
-                'original': email
-            }

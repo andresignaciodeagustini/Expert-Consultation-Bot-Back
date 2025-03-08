@@ -328,6 +328,29 @@ NEW_LANGUAGE_PATTERNS = {
         }
     }
 }
+# Nueva configuración de TLDs internacionales
+INTERNATIONAL_TLDS = {
+    'us': ['com', 'org', 'net', 'edu', 'gov', 'mil'],
+    'uk': ['co.uk', 'org.uk', 'me.uk', 'ac.uk', 'gov.uk'],
+    'eu': ['eu', 'de', 'fr', 'es', 'it', 'nl', 'be', 'at', 'dk', 'fi', 'gr', 'ie', 'pt', 'se'],
+    'asia': ['jp', 'cn', 'kr', 'in', 'sg', 'hk', 'tw', 'my', 'th', 'vn'],
+    'ru': ['ru', 'su', 'рф', 'moscow', 'спб'],
+    # Nuevos TLDs regionales
+    'pl': ['pl', 'com.pl', 'net.pl', 'org.pl'],
+    'cz': ['cz', 'com.cz', 'net.cz'],
+    'hr': ['hr', 'com.hr'],
+    'hu': ['hu', 'co.hu'],
+    'sk': ['sk', 'com.sk'],
+    'si': ['si', 'com.si'],
+    'bg': ['bg', 'com.bg'],
+    'ro': ['ro', 'com.ro'],
+    'ua': ['ua', 'com.ua'],
+    'th': ['th', 'co.th', 'ac.th'],
+    'vn': ['vn', 'com.vn'],
+    'id': ['id', 'co.id'],
+    'my': ['my', 'com.my'],
+    'ph': ['ph', 'com.ph']
+}
 
 # Configuraciones adicionales para los nuevos idiomas
 NEW_LANGUAGE_SETTINGS = {

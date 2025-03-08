@@ -84,7 +84,11 @@ CORS(app, resources={
             "https://expert-consultation-bot-front-isej4yvne.vercel.app",
             "http://localhost:5173",
             "http://localhost:5174",
-            "http://localhost:3000"
+            "http://localhost:3000",
+            "https://expert-consultation-bot-front2.onrender.com",
+            "http://127.0.0.1:5173",
+            "https://expert-consultation-bot-back.vercel.app",
+            "https://expert-consultation-bot-back-2.onrender.com"
         ],
         "methods": ["GET", "POST", "OPTIONS"],
         "allow_headers": ["Content-Type", "Authorization"],
@@ -180,7 +184,6 @@ def refresh_token():
             'success': False,
             'error': str(e)
         }), 500
-
 
 ###################################################################################################
 ######################################FASE 1 !!!!!!!!!!
@@ -2550,3 +2553,11 @@ def search_candidates():
             'success': False,
             'error': str(e)
         }), 500
+
+
+@app.route('/api/ping')
+def ping():
+    return jsonify({
+        "status": "active",
+        "timestamp": datetime.now().isoformat()
+    })
