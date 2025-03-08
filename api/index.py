@@ -2555,9 +2555,35 @@ def search_candidates():
         }), 500
 
 
+from datetime import datetime
+import threading
+import time
+
+# Variable global para tracking
+last_ping_time = datetime.now()
+is_server_active = True
+
+def keep_alive():
+    while is_server_active:
+        try:
+            # Lógica para mantener el servidor activo
+            print(f"Server keep-alive check: {datetime.now()}")
+            time.sleep(30)  # Check cada 30 segundos
+        except Exception as e:
+            print(f"Keep-alive error: {e}")
+
+# Iniciar thread de keep-alive
+keep_alive_thread = threading.Thread(target=keep_alive, daemon=True)
+keep_alive_thread.start()
+
 @app.route('/api/ping')
 def ping():
+    global last_ping_time
+    current_time = datetime.now()
+    last_ping_time = current_time
+    
     return jsonify({
         "status": "active",
-        "timestamp": datetime.now().isoformat()
+        "timestamp": current_time.isoformat(),
+        "uptime": "active"
     })
