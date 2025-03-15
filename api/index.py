@@ -204,8 +204,6 @@ def refresh_token():
 ###################################################################################################
 ######################################FASE 1 !!!!!!!!!!
 
-
-
 @app.route('/api/welcome-message', methods=['GET'])
 def get_welcome_message():
     try:
@@ -213,50 +211,59 @@ def get_welcome_message():
         print("\n=== Welcome Message Endpoint Started ===")
         print(f"Previous detected language: {LAST_DETECTED_LANGUAGE}")
         
-        # Primera opción: ipapi.co
-        try:
-            print("Attempting primary IP detection (ipapi.co)...")
-            response = requests.get('https://ipapi.co/json/', timeout=5)
-            data = response.json()
-            
-            if 'error' in data:
-                raise Exception(f"ipapi.co error: {data.get('reason', 'Unknown error')}")
-                
-            country_code = data.get('country_code', 'US')
-            print(f"Successfully detected country from ipapi.co: {country_code}")
-            
-        except Exception as primary_error:
-            print(f"Primary IP detection failed: {str(primary_error)}")
-            
-            # Segunda opción: ip-api.com
-            try:
-                print("Attempting secondary IP detection (ip-api.com)...")
-                response = requests.get('http://ip-api.com/json/', timeout=5)
-                data = response.json()
-                
-                if data.get('status') == 'success':
-                    country_code = data.get('countryCode', 'US')
-                    print(f"Successfully detected country from ip-api.com: {country_code}")
-                else:
-                    raise Exception("ip-api.com detection failed")
-                    
-            except Exception as secondary_error:
-                print(f"Secondary IP detection failed: {str(secondary_error)}")
-                
-                # Tercera opción: ipinfo.io
-                try:
-                    print("Attempting tertiary IP detection (ipinfo.io)...")
-                    token = os.getenv('IPINFO_TOKEN', 'fallback_token')
-                    response = requests.get(f'https://ipinfo.io/json?token={token}', timeout=5)
-                    data = response.json()
-                    country_code = data.get('country', 'US')
-                    print(f"Successfully detected country from ipinfo.io: {country_code}")
-                    
-                except Exception as tertiary_error:
-                    print(f"All IP detection methods failed. Using default US")
-                    country_code = 'US'
+        # Logging exhaustivo de información de la solicitud
+        print("\n=== Heroku Request Debug ===")
+        print(f"Request Method: {request.method}")
+        print(f"Request Headers: {dict(request.headers)}")
+        print(f"Remote Address: {request.remote_addr}")
+        print(f"X-Forwarded-For Header: {request.headers.get('X-Forwarded-For')}")
+        print(f"X-Real-IP Header: {request.headers.get('X-Real-IP')}")
+        print(f"Environment: {os.getenv('ENVIRONMENT', 'Not set')}")
 
-        print(f"Final detected Country Code: {country_code}")
+        # Métodos de detección de IP con validación mejorada
+        def is_valid_ip(ip):
+            if not ip or ip == '127.0.0.1':
+                return False
+            # Regex básica para validar formato de IP
+            import re
+            ip_pattern = re.compile(r'^(\d{1,3}\.){3}\d{1,3}$')
+            return bool(ip_pattern.match(ip))
+
+        # Métodos de obtención de IP
+        ip_detection_methods = [
+            ('X-Forwarded-For', request.headers.get('X-Forwarded-For')),
+            ('X-Real-IP', request.headers.get('X-Real-IP')),
+            ('Remote Address', request.remote_addr)
+        ]
+
+        print("\n=== IP Detection Methods ===")
+        for method, ip in ip_detection_methods:
+            print(f"{method}: {ip}")
+
+        # Intentar obtener IP real con validación
+        client_ip = None
+        for method, ip in ip_detection_methods:
+            if isinstance(ip, str):
+                # Manejar caso de múltiples IPs en X-Forwarded-For
+                if ',' in ip:
+                    potential_ips = [i.strip() for i in ip.split(',')]
+                    valid_ips = [i for i in potential_ips if is_valid_ip(i)]
+                    if valid_ips:
+                        client_ip = valid_ips[0]
+                        break
+                elif is_valid_ip(ip):
+                    client_ip = ip
+                    break
+
+        print(f"\n=== Selected Client IP: {client_ip}")
+
+        # Intentar geolocalización con múltiples servicios
+        country_code = 'US'  # Valor por defecto
+        detection_services = [
+            ('ipapi.co', lambda ip: requests.get(f'https://ipapi.co/{ip}/json/', timeout=5)),
+            ('ip-api.com', lambda ip: requests.get(f'http://ip-api.com/json/{ip}', timeout=5)),
+            ('ipinfo.io', lambda ip: requests.get(f'https://ipinfo.io/{ip}/json?token={os.getenv("IPINFO_TOKEN", "")}', timeout=5))
+        ]
 
         # Mapeo extensivo de países a códigos de idioma
         language_map = {
@@ -272,24 +279,49 @@ def get_welcome_message():
             'IE': 'en', 'ZA': 'en', 'JM': 'en', 'BZ': 'en', 'TT': 'en',
             'GY': 'en', 'AG': 'en', 'BS': 'en', 'BB': 'en',
 
-            # Francés (fr)
-            'FR': 'fr', 'CA-FR': 'fr', 'BE': 'fr', 'CH': 'fr', 'MC': 'fr',
-            'LU': 'fr', 'SN': 'fr', 'CI': 'fr', 'ML': 'fr', 'BF': 'fr',
-            'NE': 'fr', 'TG': 'fr', 'BJ': 'fr', 'GA': 'fr', 'CG': 'fr',
-            'MG': 'fr', 'CM': 'fr', 'DZ': 'fr', 'TN': 'fr', 'MA': 'fr',
-
-            # [Resto del mapeo de idiomas igual...]
+            # Otros idiomas...
         }
+
+        # Geolocalización con manejo de errores
+        if client_ip:
+            for service_name, service_func in detection_services:
+                try:
+                    print(f"\n=== Attempting IP Geolocation with {service_name} ===")
+                    response = service_func(client_ip)
+                    data = response.json()
+                    
+                    print(f"Full Response from {service_name}: {data}")
+
+                    # Lógica de extracción de código de país según el servicio
+                    if service_name == 'ipapi.co':
+                        country_code = data.get('country_code', 'US')
+                    elif service_name == 'ip-api.com':
+                        country_code = data.get('countryCode', 'US')
+                    elif service_name == 'ipinfo.io':
+                        country_code = data.get('country', 'US')
+
+                    print(f"Detected Country Code: {country_code}")
+                    
+                    # Romper el bucle si se detecta un código de país válido
+                    if country_code in language_map:
+                        break
+
+                except Exception as e:
+                    print(f"Error with {service_name}: {str(e)}")
+        else:
+            print("No valid IP found, using default country")
 
         # Obtener el código de idioma correcto
         target_language = language_map.get(country_code, 'en')
-        print(f"Mapped language code: {target_language}")
+        print(f"\n=== Final Language Detection ===")
+        print(f"Country Code: {country_code}")
+        print(f"Target Language: {target_language}")
 
         # Actualizar el idioma global
         LAST_DETECTED_LANGUAGE = target_language
         print(f"Updated LAST_DETECTED_LANGUAGE to: {LAST_DETECTED_LANGUAGE}")
 
-        # Mensajes de bienvenida base en inglés con el nombre de la compañía protegido
+        # Mensajes de bienvenida base
         welcome_messages = {
             "greeting": {
                 "text": "Welcome to Silverlight Research Expert Network! I'm here to help you find the perfect expert for your needs.",
@@ -300,7 +332,7 @@ def get_welcome_message():
 
         chatgpt = ChatGPTHelper()
         
-        # Si no es inglés, incluir ambas versiones
+        # Traducción condicional
         if target_language != 'en':
             print(f"Translating messages to language: {target_language}")
             translated_messages = {
@@ -316,6 +348,12 @@ def get_welcome_message():
                     "translated": chatgpt.translate_message(welcome_messages["instruction"], target_language)
                 }
             }
+            
+            print("\n=== Translation Debug ===")
+            print(f"Original Greeting: {welcome_messages['greeting']['text']}")
+            print(f"Translated Greeting: {translated_messages['greeting'].get('translated', 'Translation Failed')}")
+            print(f"Original Instruction: {welcome_messages['instruction']}")
+            print(f"Translated Instruction: {translated_messages['instruction'].get('translated', 'Translation Failed')}")
         else:
             print("English language detected, using English only")
             translated_messages = {
@@ -327,15 +365,13 @@ def get_welcome_message():
                 }
             }
         
+        # Preparar respuesta
         response_data = {
             'success': True,
             'detected_language': target_language,
             'messages': translated_messages,
             'country_code': country_code,
-            'is_english_speaking': target_language == 'en',
-            'detection_method': 'primary' if 'primary_error' not in locals() else 
-                              'secondary' if 'secondary_error' not in locals() else 
-                              'tertiary' if 'tertiary_error' not in locals() else 'default'
+            'is_english_speaking': target_language == 'en'
         }
         
         print("\n=== Welcome Message Response ===")
@@ -349,23 +385,29 @@ def get_welcome_message():
         print(f"Error details: {str(e)}")
         print(f"Error location: {e.__traceback__.tb_lineno}")
         
+        # Imprimir traza completa
+        import traceback
+        traceback.print_exc()
+
         error_message = "Error generating welcome message"
         if 'chatgpt' in locals():
-            error_message = chatgpt.translate_message(
-                error_message,
-                LAST_DETECTED_LANGUAGE if LAST_DETECTED_LANGUAGE else 'en'
-            )
-        
+            try:
+                error_message = chatgpt.translate_message(
+                    error_message,
+                    LAST_DETECTED_LANGUAGE if LAST_DETECTED_LANGUAGE else 'en'
+                )
+            except Exception as translate_error:
+                print(f"Translation error: {translate_error}")
+
         return jsonify({
             'success': False,
             'error': error_message,
-            'detected_language': 'en'
+            'detected_language': 'en',
+            'debug_info': {
+                'error_type': str(type(e)),
+                'error_message': str(e)
+            }
         }), 500
-   
-
-
-
-
 
 REGISTERED_TEST_EMAILS = [
     "test@test.com",        # Inglés
