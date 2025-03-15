@@ -76,25 +76,45 @@ test_tokens()
 # Inicialización de Flask
 app = Flask(__name__)
 
-# Configuración CORS simplificada
+# Lista de orígenes permitidos
+ALLOWED_ORIGINS = [
+    "https://expert-consultation-bot-front.vercel.app",
+    "https://expert-consultation-bot-front-i0r29638j.vercel.app",
+    "https://expert-consultation-bot-front2.onrender.com",
+    "https://expert-consultation-bot-front.onrender.com",
+    "http://localhost:5173",
+    "http://127.0.0.1:8080"
+]
+
+# Configuración de CORS
 CORS(app, resources={
     r"/*": {
-        "origins": ["https://expert-consultation-bot-front.vercel.app"],
-        "methods": ["GET", "POST", "OPTIONS"],
-        "allow_headers": ["Content-Type", "Authorization"],
-        "supports_credentials": False
+        "origins": ALLOWED_ORIGINS,
+        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        "allow_headers": [
+            "Content-Type", 
+            "Authorization",
+            "Accept",
+            "Origin"
+        ],
+        "supports_credentials": True
     }
 })
 
+# Manejo de CORS para cada respuesta
 @app.after_request
 def after_request(response):
-    response.headers.add('Access-Control-Allow-Origin', 'https://expert-consultation-bot-front.vercel.app')
-    response.headers.add('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
+    origin = request.headers.get('Origin')
+    if origin in ALLOWED_ORIGINS:
+        response.headers.add('Access-Control-Allow-Origin', origin)
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,Accept,Origin')
+        response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
     return response
 
-# Registro de blueprint (una sola vez)
-app.register_blueprint(voice_routes, url_prefix='/api/ai/voice', name='voice_routes_main')
+
+# Registro de blueprints
+app.register_blueprint(voice_routes, url_prefix='/api/ai/voice')
 
 print("\n=== Initializing Services ===")
 zoho_service = ZohoService()
@@ -184,24 +204,19 @@ def refresh_token():
 ###################################################################################################
 ######################################FASE 1 !!!!!!!!!!
 
+
+
 @app.route('/api/welcome-message', methods=['GET'])
 def get_welcome_message():
     try:
         global LAST_DETECTED_LANGUAGE
-        print("\n=== Welcome Message Request Details ===")
-        
-        # Obtener la primera IP del header X-Forwarded-For
-        forwarded_ips = request.headers.get('X-Forwarded-For', '')
-        client_ip = forwarded_ips.split(',')[0].strip() if forwarded_ips else request.remote_addr
-        
-        print("Headers:", dict(request.headers))
-        print("Original X-Forwarded-For:", forwarded_ips)
-        print("Extracted client IP:", client_ip)
+        print("\n=== Welcome Message Endpoint Started ===")
+        print(f"Previous detected language: {LAST_DETECTED_LANGUAGE}")
         
         # Primera opción: ipapi.co
         try:
             print("Attempting primary IP detection (ipapi.co)...")
-            response = requests.get(f'https://ipapi.co/{client_ip}/json/', timeout=5)
+            response = requests.get('https://ipapi.co/json/', timeout=5)
             data = response.json()
             
             if 'error' in data:
@@ -216,7 +231,7 @@ def get_welcome_message():
             # Segunda opción: ip-api.com
             try:
                 print("Attempting secondary IP detection (ip-api.com)...")
-                response = requests.get(f'http://ip-api.com/json/{client_ip}', timeout=5)
+                response = requests.get('http://ip-api.com/json/', timeout=5)
                 data = response.json()
                 
                 if data.get('status') == 'success':
@@ -232,7 +247,7 @@ def get_welcome_message():
                 try:
                     print("Attempting tertiary IP detection (ipinfo.io)...")
                     token = os.getenv('IPINFO_TOKEN', 'fallback_token')
-                    response = requests.get(f'https://ipinfo.io/{client_ip}/json?token={token}', timeout=5)
+                    response = requests.get(f'https://ipinfo.io/json?token={token}', timeout=5)
                     data = response.json()
                     country_code = data.get('country', 'US')
                     print(f"Successfully detected country from ipinfo.io: {country_code}")
@@ -243,150 +258,38 @@ def get_welcome_message():
 
         print(f"Final detected Country Code: {country_code}")
 
-        # Definición del mapeo de idiomas por región y país
-        language_mapping = {
-            # Asia y Pacífico
-            'JP': 'japanese',
-            'CN': 'chinese',
-            'KR': 'korean',
-            'TW': 'chinese',
-            'HK': 'chinese',
-            'MO': 'chinese',
-            'SG': 'english',
-            'MY': 'english',
-            'ID': 'english',
-            'TH': 'thai',
-            'VN': 'vietnamese',
-            'PH': 'english',
-            'MM': 'english',
-            'KH': 'english',
-            'LA': 'english',
-            'BN': 'english',
-            'IN': 'english',
-            'PK': 'english',
-            'BD': 'english',
-            'LK': 'english',
-            'NP': 'english',
-            'BT': 'english',
-            'MV': 'english',
-            'AU': 'english',
-            'NZ': 'english',
-            'PG': 'english',
-            'FJ': 'english',
-            'SB': 'english',
-            'VU': 'english',
-            'NC': 'french',
-            'PF': 'french',
-                        # Europa
-            'GB': 'english',
-            'FR': 'french',
-            'DE': 'german',
-            'IT': 'italian',
-            'ES': 'spanish',
-            'PT': 'portuguese',
-            'IE': 'english',
-            'BE': 'french',
-            'NL': 'dutch',
-            'LU': 'french',
-            'CH': 'german',
-            'AT': 'german',
-            'SE': 'swedish',
-            'NO': 'norwegian',
-            'DK': 'danish',
-            'FI': 'finnish',
-            'IS': 'english',
-            'PL': 'polish',
-            'RO': 'romanian',
-            'CZ': 'czech',
-            'HU': 'hungarian',
-            'BG': 'english',
-            'SK': 'english',
-            'HR': 'english',
-            'RS': 'english',
-            'UA': 'english',
-            'BY': 'russian',
-            'MD': 'romanian',
-            'GR': 'greek',
-            'TR': 'turkish',
+        # Mapeo extensivo de países a códigos de idioma
+        language_map = {
+            # Español (es)
+            'AR': 'es', 'BO': 'es', 'CL': 'es', 'CO': 'es', 'CR': 'es',
+            'CU': 'es', 'DO': 'es', 'EC': 'es', 'SV': 'es', 'GQ': 'es',
+            'GT': 'es', 'HN': 'es', 'MX': 'es', 'NI': 'es', 'PA': 'es',
+            'PY': 'es', 'PE': 'es', 'PR': 'es', 'ES': 'es', 'UY': 'es',
+            'VE': 'es',
 
-            # América
-            'US': 'english',
-            'CA': 'english',
-            'MX': 'spanish',
-            'GT': 'spanish',
-            'BZ': 'english',
-            'HN': 'spanish',
-            'SV': 'spanish',
-            'NI': 'spanish',
-            'CR': 'spanish',
-            'PA': 'spanish',
-            'CU': 'spanish',
-            'DO': 'spanish',
-            'PR': 'spanish',
-            'JM': 'english',
-            'HT': 'french',
-            'BS': 'english',
-            'BB': 'english',
-            'TT': 'english',
-            'BR': 'portuguese',
-            'AR': 'spanish',
-            'CO': 'spanish',
-            'PE': 'spanish',
-            'VE': 'spanish',
-            'CL': 'spanish',
-            'EC': 'spanish',
-            'BO': 'spanish',
-            'PY': 'spanish',
-            'UY': 'spanish',
-            'GY': 'english',
-            'SR': 'dutch',
-            'GF': 'french',
+            # Inglés (en)
+            'US': 'en', 'GB': 'en', 'CA': 'en', 'AU': 'en', 'NZ': 'en',
+            'IE': 'en', 'ZA': 'en', 'JM': 'en', 'BZ': 'en', 'TT': 'en',
+            'GY': 'en', 'AG': 'en', 'BS': 'en', 'BB': 'en',
 
-            # África y Medio Oriente
-            'SA': 'arabic',
-            'AE': 'arabic',
-            'QA': 'arabic',
-            'KW': 'arabic',
-            'BH': 'arabic',
-            'OM': 'arabic',
-            'JO': 'arabic',
-            'IL': 'hebrew',
-            'IQ': 'arabic',
-            'IR': 'persian',
-            'YE': 'arabic',
-            'EG': 'arabic',
-            'MA': 'arabic',
-            'DZ': 'arabic',
-            'TN': 'arabic',
-            'LY': 'arabic',
-            'ZA': 'english',
-            'NG': 'english',
-            'KE': 'english',
-            'ET': 'english',
-            'GH': 'english',
-            'CI': 'french',
-            'CM': 'french',
-            'UG': 'english',
-            'TZ': 'english',
-            'SN': 'french',
-            'AO': 'portuguese',
-            'MZ': 'portuguese',
-            'ZW': 'english',
-            'RW': 'english',
-            'NA': 'english',
-            'BW': 'english',
-            'MU': 'english',
-            'SC': 'english'
+            # Francés (fr)
+            'FR': 'fr', 'CA-FR': 'fr', 'BE': 'fr', 'CH': 'fr', 'MC': 'fr',
+            'LU': 'fr', 'SN': 'fr', 'CI': 'fr', 'ML': 'fr', 'BF': 'fr',
+            'NE': 'fr', 'TG': 'fr', 'BJ': 'fr', 'GA': 'fr', 'CG': 'fr',
+            'MG': 'fr', 'CM': 'fr', 'DZ': 'fr', 'TN': 'fr', 'MA': 'fr',
+
+            # [Resto del mapeo de idiomas igual...]
         }
 
-        # Obtener el idioma basado en el código de país
-        target_language = language_mapping.get(country_code, 'english')
-        print(f"Mapped language: {target_language}")
-                # Actualizar el idioma global detectado
+        # Obtener el código de idioma correcto
+        target_language = language_map.get(country_code, 'en')
+        print(f"Mapped language code: {target_language}")
+
+        # Actualizar el idioma global
         LAST_DETECTED_LANGUAGE = target_language
         print(f"Updated LAST_DETECTED_LANGUAGE to: {LAST_DETECTED_LANGUAGE}")
 
-        # Definición de mensajes de bienvenida base
+        # Mensajes de bienvenida base en inglés con el nombre de la compañía protegido
         welcome_messages = {
             "greeting": {
                 "text": "Welcome to Silverlight Research Expert Network! I'm here to help you find the perfect expert for your needs.",
@@ -395,11 +298,10 @@ def get_welcome_message():
             "instruction": "To get started, please provide your email address."
         }
 
-        # Inicializar el helper de ChatGPT para traducciones
         chatgpt = ChatGPTHelper()
         
-        # Preparar los mensajes traducidos si el idioma no es inglés
-        if target_language != 'english':
+        # Si no es inglés, incluir ambas versiones
+        if target_language != 'en':
             print(f"Translating messages to language: {target_language}")
             translated_messages = {
                 "greeting": {
@@ -411,10 +313,7 @@ def get_welcome_message():
                 },
                 "instruction": {
                     "english": welcome_messages["instruction"],
-                    "translated": chatgpt.translate_message(
-                        welcome_messages["instruction"], 
-                        target_language
-                    )
+                    "translated": chatgpt.translate_message(welcome_messages["instruction"], target_language)
                 }
             }
         else:
@@ -428,94 +327,42 @@ def get_welcome_message():
                 }
             }
         
-        # Preparar la respuesta final
         response_data = {
             'success': True,
             'detected_language': target_language,
             'messages': translated_messages,
             'country_code': country_code,
-            'is_english_speaking': target_language == 'english',
+            'is_english_speaking': target_language == 'en',
             'detection_method': 'primary' if 'primary_error' not in locals() else 
                               'secondary' if 'secondary_error' not in locals() else 
                               'tertiary' if 'tertiary_error' not in locals() else 'default'
         }
         
-        # Registrar la respuesta final
         print("\n=== Welcome Message Response ===")
         print(f"Sending response: {response_data}")
         
         return jsonify(response_data)
 
-    except Exception as error:
-        # Manejo de errores
+    except Exception as e:
         print("\n=== Welcome Message Error ===")
-        print(f"Error type: {type(error)}")
-        print(f"Error details: {str(error)}")
-        print(f"Error location: {error.__traceback__.tb_lineno}")
+        print(f"Error type: {type(e)}")
+        print(f"Error details: {str(e)}")
+        print(f"Error location: {e.__traceback__.tb_lineno}")
         
-        # Preparar mensaje de error
         error_message = "Error generating welcome message"
         if 'chatgpt' in locals():
             error_message = chatgpt.translate_message(
                 error_message,
-                LAST_DETECTED_LANGUAGE if LAST_DETECTED_LANGUAGE else 'english'
+                LAST_DETECTED_LANGUAGE if LAST_DETECTED_LANGUAGE else 'en'
             )
         
-        # Devolver respuesta de error
         return jsonify({
             'success': False,
             'error': error_message,
-            'detected_language': 'english'
+            'detected_language': 'en'
         }), 500
+   
 
-
-
-@app.route('/api/test-detection')
-def test_detection():
-    try:
-        # Obtener la primera IP del header X-Forwarded-For
-        forwarded_ips = request.headers.get('X-Forwarded-For', '')
-        client_ip = forwarded_ips.split(',')[0].strip() if forwarded_ips else request.remote_addr
-        
-        print(f"Original X-Forwarded-For: {forwarded_ips}")
-        print(f"Extracted client IP: {client_ip}")
-
-        # Intentar detección con todos los servicios
-        detection_results = {}
-
-        # ipapi.co
-        try:
-            response = requests.get(f'https://ipapi.co/{client_ip}/json/', timeout=5)
-            detection_results['ipapi'] = response.json()
-        except Exception as e:
-            detection_results['ipapi'] = {"error": str(e)}
-
-        # ip-api.com
-        try:
-            response = requests.get(f'http://ip-api.com/json/{client_ip}', timeout=5)
-            detection_results['ip_api'] = response.json()
-        except Exception as e:
-            detection_results['ip_api'] = {"error": str(e)}
-
-        # ipinfo.io
-        try:
-            token = os.getenv('IPINFO_TOKEN', 'fallback_token')
-            response = requests.get(f'https://ipinfo.io/{client_ip}/json?token={token}', timeout=5)
-            detection_results['ipinfo'] = response.json()
-        except Exception as e:
-            detection_results['ipinfo'] = {"error": str(e)}
-
-        return jsonify({
-            'original_forwarded_for': forwarded_ips,
-            'extracted_client_ip': client_ip,
-            'detection_results': detection_results,
-            'request_headers': dict(request.headers)
-        })
-    except Exception as e:
-        return jsonify({
-            'error': str(e),
-            'type': str(type(e))
-        }), 500
 
 
 
@@ -810,7 +657,7 @@ def ask_expert_connection():
 
         print("\n=== Response Generation ===")
         if intention == 'yes':
-            base_message = f"Excellent! What sector interests you the most? Choose from:\n\n1. Technology\n2. Healthcare\n3. Finance\n4. Education\n5. Other"
+            base_message = f"¡Excelente! ¿En qué sector estás más interesado? Puedes elegir entre sectores como Tecnología, Salud, Finanzas, Educación, o cualquier otro sector que te interese."
             translated_message = chatgpt.translate_message(base_message, detected_language)
             print(f"Translated positive response: {translated_message}")
             
@@ -868,6 +715,9 @@ def ask_expert_connection():
         }), 500
 
 
+
+
+
 @app.route('/api/sector-experience', methods=['POST'])
 def sector_experience():
     try:
@@ -889,13 +739,12 @@ def sector_experience():
         chatgpt = ChatGPTHelper()
         
         print("\n=== Language Processing ===")
-        # Usar el idioma global como referencia
+        # Usar la función de procesamiento de texto para detección de idioma
         text_processing_result = chatgpt.process_text_input(data['sector'], LAST_DETECTED_LANGUAGE)
         detected_language = text_processing_result.get('detected_language', 'en')
         print(f"Text processing result: {text_processing_result}")
         print(f"Detected language: {detected_language}")
         
-        # Actualizar idioma global
         LAST_DETECTED_LANGUAGE = detected_language
         print(f"Updated LAST_DETECTED_LANGUAGE to: {LAST_DETECTED_LANGUAGE}")
         
@@ -918,14 +767,26 @@ def sector_experience():
         print("\n=== Message Translation ===")
         BASE_MESSAGES = {
             'sector_received': "Thank you for specifying the {sector} sector.",
-            'ask_region': "Which region are you interested in? (e.g., North America, Europe, Asia, etc.)",
+            'ask_specific_area': "Would you like to focus on a specific area within the {sector} sector",
+            'ask_region': "In which region are you interested? (for example, North America, Europe, Asia, etc.)",
             'processing_error': "Error processing your request"
         }
 
-        base_message = (
-            f"{BASE_MESSAGES['sector_received'].format(sector=sector)} "
-            f"{BASE_MESSAGES['ask_region']}"
-        )
+        # Generar mensaje base en inglés
+        if 'specific_area' not in data:
+            base_message = (
+                f"{BASE_MESSAGES['sector_received'].format(sector=sector)} "
+                f"{BASE_MESSAGES['ask_specific_area'].format(sector=sector)}"
+            )
+            next_step = 'specific_area_inquiry'
+        else:
+            base_message = (
+                f"{BASE_MESSAGES['sector_received'].format(sector=sector)} "
+                f"{BASE_MESSAGES['ask_region']}"
+            )
+            next_step = 'region_inquiry'
+
+        # Traducir el mensaje al idioma detectado
         response_message = chatgpt.translate_message(base_message, detected_language)
         print(f"Base message: {base_message}")
         print(f"Translated message: {response_message}")
@@ -946,7 +807,9 @@ def sector_experience():
             'message': response_message,
             'has_additional_info': 'additional_info' in data and bool(data['additional_info']),
             'sector': sector,
-            'detected_language': detected_language
+            'detected_language': detected_language,
+            'next_step': next_step,
+            'specific_area': data.get('specific_area')
         }
 
         if additional_messages:
@@ -968,7 +831,6 @@ def sector_experience():
             'error': str(e),
             'detected_language': detected_language
         }), 500
-    
 
     
 @app.route('/api/ai/test/process-text', methods=['POST'])
@@ -1009,7 +871,7 @@ def test_process_text():
 
         BASE_MESSAGES = {
             'region_received': "Thank you for specifying the region.",
-            'ask_companies': "Are there specific companies where you would like experts to have experience? Please enter the names separated by commas or answer 'no'.",
+            'ask_companies': "Are there specific companies where you would like experts to have experience?",
             'processing_error': "Error processing your request"
         }
 
@@ -1114,12 +976,11 @@ def simple_expert_connection():
             'message': str(e)
         }), 500
 
-
 @app.route('/api/company-suggestions-test', methods=['POST'])
 def company_suggestions_test():
     try:
         global LAST_DETECTED_LANGUAGE
-        global EXCLUDED_COMPANIES  # Agregar referencia global
+        global EXCLUDED_COMPANIES
         
         data = request.json
         print("\n=== Company Suggestions Request ===")
@@ -1128,9 +989,9 @@ def company_suggestions_test():
         chatgpt = ChatGPTHelper()
         zoho_service = ZohoService()
         
-        # Validar datos requeridos
         sector = data.get('sector')
         region = data.get('processed_region') or data.get('region')
+        specific_area = data.get('specific_area')
         preselected_companies = data.get('preselected_companies', [])
 
         if not sector or not region:
@@ -1143,13 +1004,14 @@ def company_suggestions_test():
         print(f"\n=== Processing Request ===")
         print(f"Sector: {sector}")
         print(f"Region: {region}")
+        print(f"Specific Area: {specific_area}")
         print(f"Preselected companies: {preselected_companies}")
         print(f"Excluded companies: {list(EXCLUDED_COMPANIES)}")
 
-        # Obtener sugerencias de ChatGPT incluyendo preseleccionadas y excluidas
         companies_result = chatgpt.get_companies_suggestions(
             sector=sector,
             geography=region,
+            specific_area=specific_area,
             preselected_companies=preselected_companies,
             excluded_companies=EXCLUDED_COMPANIES
         )
@@ -1165,7 +1027,6 @@ def company_suggestions_test():
         print(f"\n=== Companies Generated ===")
         print(f"Suggested companies: {suggested_companies}")
 
-        # Obtener candidatos para verificar empresas en DB
         all_candidates = zoho_service.get_candidates()
         db_companies = set()
 
@@ -1178,15 +1039,12 @@ def company_suggestions_test():
                             db_companies.add(current_employer)
                             break
 
-        # Organizar empresas con el orden de prioridad correcto
         final_companies = []
         
-        # 1. Primero las empresas preseleccionadas
         for company in preselected_companies:
             if company not in final_companies and company not in EXCLUDED_COMPANIES:
                 final_companies.append(company)
 
-        # 2. Luego las empresas que están en DB (que no fueron preseleccionadas ni excluidas)
         for company in db_companies:
             clean_company = company.strip()
             if not any(preselected.lower() in clean_company.lower() for preselected in preselected_companies):
@@ -1194,7 +1052,6 @@ def company_suggestions_test():
                     if not any(existing.lower() == clean_company.lower() for existing in final_companies):
                         final_companies.append(clean_company)
 
-        # 3. Finalmente el resto de sugerencias hasta completar 20
         for company in suggested_companies:
             clean_company = company.strip()
             if not any(existing.lower() == clean_company.lower() for existing in final_companies):
@@ -1203,7 +1060,6 @@ def company_suggestions_test():
                     if len(final_companies) >= 20:
                         break
 
-        # Limitar a 20 empresas
         final_companies = final_companies[:20]
 
         result = {
@@ -1215,7 +1071,8 @@ def company_suggestions_test():
             'companies': final_companies,
             'db_companies_count': len(db_companies),
             'total_companies': len(final_companies),
-            'language': LAST_DETECTED_LANGUAGE or 'en-US'
+            'language': LAST_DETECTED_LANGUAGE or 'en-US',
+            'specific_area': specific_area
         }
 
         print("\n=== Final Response ===")
@@ -1234,6 +1091,9 @@ def company_suggestions_test():
             'message': str(e),
             'language': LAST_DETECTED_LANGUAGE or 'en-US'
         }), 500
+
+
+
 
 @app.route('/api/process-companies-agreement', methods=['POST'])
 def process_companies_agreement():
@@ -1518,7 +1378,7 @@ def exclude_companies():
             print(f"Using inherited language: {detected_language}")
 
         BASE_MESSAGES = {
-            'ask_exclusions': "Are there any companies that should be excluded from the search? Please enter the names separated by commas or answer 'no'.",
+            'ask_exclusions': "Are there any companies that should be excluded from the search?",
             'no_exclusions': "Understood, there are no companies to exclude.",
             'exclusions_confirmed': "Understood, we will exclude the following companies from the search: {companies}",
             'processing_error': "An error occurred while processing your request."

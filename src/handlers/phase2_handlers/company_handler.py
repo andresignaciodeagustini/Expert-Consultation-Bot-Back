@@ -1,6 +1,6 @@
 # src/handlers/company_handler.py
 from src.utils.chatgpt_helper import ChatGPTHelper
-from src.services.zoho_services import ZohoService
+from src.services.external.zoho_services import ZohoService
 
 class CompanyHandler:
     def __init__(self, zoho_service: ZohoService):

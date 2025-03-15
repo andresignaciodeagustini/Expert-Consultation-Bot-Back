@@ -388,94 +388,19 @@ class ChatGPTHelper:
         self,
         sector: str,
         geography: str,
-        preselected_companies: List[str] = None,  # Nuevo parámetro
-        temperature: float = 0.7
-    ) -> Dict:
-        try:
-            logger.info(f"Generating companies for sector: {sector}, geography: {geography}")
-            if preselected_companies:
-                logger.info(f"Including preselected companies: {preselected_companies}")
-
-            # Modificar el prompt para incluir las empresas preseleccionadas
-            preselected_text = ""
-            if preselected_companies:
-                preselected_text = f"Please include these specific companies first in your suggestions: {', '.join(preselected_companies)}. "
-
-            messages = [
-                {
-                    "role": "system",
-                    "content": """You are a professional business analyst that provides accurate lists of companies.
-                    When given a sector and location, provide real companies that operate in that specific location.
-                    If specific companies are requested, include them first in your response."""
-                },
-                {
-                    "role": "user",
-                    "content": f"{preselected_text}List exactly 20 real companies in the {sector} sector that have significant operations or presence in {geography}. If {geography} is not a valid or specific location, please indicate that. Only provide the company names separated by commas, or indicate if the location is invalid."
-                }
-            ]
-
-            response = self.client.chat.completions.create(
-                model="gpt-4",
-                messages=messages,
-                temperature=temperature,
-                max_tokens=250
-            )
-
-            content = response.choices[0].message.content
-            if not content:
-                logger.info("Received empty response from API")
-                return {
-                    "success": True,
-                    "content": [],
-                    "contentId": str(uuid.uuid4())
-                }
-
-            companies = [
-                company.strip()
-                for company in content.split(',')
-                if company.strip() and not company.strip().isspace()
-            ]
-
-            # Asegurar que las empresas preseleccionadas estén incluidas
-            if preselected_companies:
-                # Remover duplicados manteniendo el orden
-                final_companies = []
-                # Primero las preseleccionadas
-                for company in preselected_companies:
-                    if company not in final_companies:
-                        final_companies.append(company)
-                # Luego el resto hasta completar 20
-                for company in companies:
-                    if company not in final_companies and len(final_companies) < 20:
-                        final_companies.append(company)
-                companies = final_companies
-
-            logger.info(f"Successfully generated {len(companies)} companies")
-
-            return {
-                "success": True,
-                "content": companies[:20],
-                "contentId": str(uuid.uuid4())
-            }
-
-        except Exception as e:
-            logger.error(f"Error generating companies: {str(e)}")
-            return {
-                "success": False,
-                "error": "An error occurred while generating companies",
-                "contentId": None
-            }
-
-    def get_companies_suggestions(
-        self,
-        sector: str,
-        geography: str,
+        specific_area: str = None,  # Nuevo parámetro
         preselected_companies: List[str] = None,
         excluded_companies: Set[str] = None,  # Añadido parámetro de exclusión
         temperature: float = 0.7
     ) -> Dict:
         try:
-            logger.info(f"Generating companies for sector: {sector}, geography: {geography}")
+            # Si hay un área específica, modificar la descripción del sector
+            if specific_area:
+                sector_description = f"{specific_area} within the {sector} sector"
+            else:
+                sector_description = f"{sector} sector"
+
+            logger.info(f"Generating companies for sector: {sector_description}, geography: {geography}")
             
             # Filtrar empresas preseleccionadas que estén en la lista de excluidas
             if preselected_companies and excluded_companies:
@@ -506,7 +431,7 @@ class ChatGPTHelper:
                 },
                 {
                     "role": "user",
-                    "content": f"{prompt_text}List exactly 20 real companies in the {sector} sector that have significant operations or presence in {geography}. If {geography} is not a valid or specific location, please indicate that. Only provide the company names separated by commas, or indicate if the location is invalid."
+                    "content": f"{prompt_text}List exactly 20 real companies in the {sector_description} that have significant operations or presence in {geography}. If {geography} is not a valid or specific location, please indicate that. Only provide the company names separated by commas, or indicate if the location is invalid."
                 }
             ]
 
@@ -570,12 +495,7 @@ class ChatGPTHelper:
                 "success": False,
                 "error": "An error occurred while generating companies",
                 "contentId": None
-            }       
-
-
-
-
-
+            }
 
 
             
@@ -976,65 +896,66 @@ class ChatGPTHelper:
 
         
     def extract_name(self, text: str) -> Dict:
+        try:
+            messages = [
+                {
+                    "role": "system",
+                    "content": """You are a name extractor. Your task is to find and return ONLY the person's name from the input text.
+                    CRITICAL RULES:
+                    - Return ONLY the name, nothing else
+                    - IMPORTANT: Capitalize ONLY the first letter of the name
+                    - DO NOT modify or change any other part of the name
+                    - Preserve the EXACT original capitalization of the rest of the name
+                    - Return the full name if provided (first name and last name)
+                    - If multiple names are found, return only the first one
+                    - If no name is found, return 'no_name'
+                    - Do not include titles (Mr., Mrs., Dr., etc.)
 
-            try:
-                messages = [
-                    {
-                        "role": "system",
-                        "content": """You are a name extractor. Your task is to find and return ONLY the person's name from the input text.
-                        Rules:
-                        - Return ONLY the name, nothing else
-                        - Return the full name if provided (first name and last name)
-                        - If multiple names are found, return only the first one
-                        - If no name is found, return 'no_name'
-                        - Preserve the exact case of the name as provided
-                        - Do not include titles (Mr., Mrs., Dr., etc.)
-                        Example inputs and outputs:
-                        Input: "My name is John Doe"
-                        Output: John Doe
-                        Input: "Hello, I am María García"
-                        Output: María García
-                        Input: "Dr. James Smith here"
-                        Output: James Smith
-                        Input: "Just call me Bob"
-                        Output: Bob
-                        Input: "No name mentioned here"
-                        Output: no_name"""
-                    },
-                    {
-                        "role": "user",
-                        "content": text
-                    }
-                ]
+                    CAPITALIZATION EXAMPLES:
+                    Input: "jENNIFER" → Output: "Jennyfer"
+                    Input: "JENNIFER" → Output: "Jennifer"
+                    Input: "maria jose" → Output: "Maria jose"
+                    Input: "MARIA JOSE" → Output: "Maria jose"
+                    Input: "mC dONALD" → Output: "Mc donald"
 
-                response = self.client.chat.completions.create(
-                    model="gpt-3.5-turbo",
-                    messages=messages,
-                    temperature=0,
-                    max_tokens=50
-                )
-
-                extracted_name = response.choices[0].message.content.strip()
-                
-                if extracted_name == 'no_name':
-                    return {
-                        "success": False,
-                        "error": "No name found in the text",
-                        "name": None
-                    }
-
-                return {
-                    "success": True,
-                    "name": extracted_name
+                    Strict rules:
+                    - First letter MUST be uppercase
+                    - Rest of the name MUST remain exactly as in the original text
+                    - No additional modifications allowed"""
+                },
+                {
+                    "role": "user",
+                    "content": text
                 }
+            ]
 
-            except Exception as e:
+            response = self.client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=messages,
+                temperature=0,
+                max_tokens=50
+            )
 
+            extracted_name = response.choices[0].message.content.strip()
+            
+            if extracted_name == 'no_name':
                 return {
                     "success": False,
-                    "error": str(e),
+                    "error": "No name found in the text",
                     "name": None
                 }
+
+            return {
+                "success": True,
+                "name": extracted_name
+            }
+
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e),
+                "name": None
+            }
 
 
 
@@ -1410,124 +1331,130 @@ class ChatGPTHelper:
             return "no"
 
 
-
     def get_companies_suggestions(
-            self,
-            sector: str,
-            geography: str,
-            preselected_companies: List[str] = None,
-            excluded_companies: Set[str] = None,
-            temperature: float = 0.7
-        ) -> Dict:
-            try:
-                logger.info(f"Generating companies for sector: {sector}, geography: {geography}")
+        self,
+        sector: str,
+        geography: str,
+        specific_area: str = None,
+        preselected_companies: List[str] = None,
+        excluded_companies: Set[str] = None,
+        temperature: float = 0.7
+    ) -> Dict:
+        try:
+            # Crear descripción del sector incluyendo área específica si está presente
+            if specific_area:
+                sector_description = f"{specific_area} within the {sector} sector"
+            else:
+                sector_description = f"{sector} sector"
 
-                # Construir el prompt incluyendo las empresas preseleccionadas y excluidas
-                prompt_parts = []
-                
-                if preselected_companies:
-                    logger.info(f"Including preselected companies: {preselected_companies}")
-                    prompt_parts.append(f"Please include these companies first in your suggestions: {', '.join(preselected_companies)}.")
-                
-                if excluded_companies:
-                    logger.info(f"Excluding companies: {excluded_companies}")
-                    prompt_parts.append(f"Do not include these companies in your suggestions: {', '.join(excluded_companies)}.")
-                
-                custom_instructions = " ".join(prompt_parts)
+            logger.info(f"Generating companies for sector: {sector_description}, geography: {geography}")
 
-                messages = [
-                    {
-                        "role": "system",
-                        "content": """You are a professional business analyst that provides accurate lists of companies.
-                        When given a sector and location, provide real companies that operate in that specific location.
-                        If specific companies are requested, include them first in your response.
-                        If companies are to be excluded, ensure they are not in your suggestions.
-                        If the location is not specific enough or invalid, indicate that in your response."""
-                    },
-                    {
-                        "role": "user",
-                        "content": f"{custom_instructions} List exactly 20 real companies in the {sector} sector that have significant operations or presence in {geography}. If {geography} is not a valid or specific location, please indicate that. Only provide the company names separated by commas, or indicate if the location is invalid."
-                    }
-                ]
+            # Construir el prompt incluyendo las empresas preseleccionadas y excluidas
+            prompt_parts = []
+            
+            if preselected_companies:
+                logger.info(f"Including preselected companies: {preselected_companies}")
+                prompt_parts.append(f"Please include these companies first in your suggestions: {', '.join(preselected_companies)}.")
+            
+            if excluded_companies:
+                logger.info(f"Excluding companies: {excluded_companies}")
+                prompt_parts.append(f"Do not include these companies in your suggestions: {', '.join(excluded_companies)}.")
+            
+            custom_instructions = " ".join(prompt_parts)
 
-                response = self.client.chat.completions.create(
-                    model="gpt-4",
-                    messages=messages,
-                    temperature=temperature,
-                    max_tokens=250
-                )
-
-                content = response.choices[0].message.content
-                if content is None or "invalid" in content.lower() or "didn't specify" in content.lower():
-                    logger.info("Invalid or unspecified location")
-                    error_message = f"Please provide a more specific location for {sector} companies."
-                    return {
-                        "success": False,
-                        "error": error_message,
-                        "content": [],
-                        "contentId": str(uuid.uuid4())
-                    }
-
-                companies = [
-                    company.strip()
-                    for company in content.split(',')
-                    if company.strip() and not company.strip().isspace()
-                ]
-
-                # Filtrar empresas excluidas
-                if excluded_companies:
-                    companies = [
-                        company for company in companies 
-                        if not any(excluded.lower() in company.lower() for excluded in excluded_companies)
-                    ]
-
-                # Asegurar que las empresas preseleccionadas estén primero
-                if preselected_companies:
-                    final_companies = []
-                    # Primero las preseleccionadas
-                    for company in preselected_companies:
-                        if company not in final_companies:
-                            final_companies.append(company)
-                    # Luego el resto hasta completar 20
-                    for company in companies:
-                        if company not in final_companies and len(final_companies) < 20:
-                            final_companies.append(company)
-                    companies = final_companies
-
-                if len(companies) < 20:
-                    logger.warning(f"Received only {len(companies)} companies, requesting more")
-                    return self.get_companies_suggestions(
-                        sector, 
-                        geography, 
-                        preselected_companies,
-                        excluded_companies,
-                        temperature
-                    )
-
-                logger.info(f"Successfully generated {len(companies)} companies")
-                if preselected_companies:
-                    logger.info(f"Included {len(preselected_companies)} preselected companies")
-                if excluded_companies:
-                    logger.info(f"Excluded {len(excluded_companies)} companies")
-
-                return {
-                    "success": True,
-                    "content": companies[:20],
-                    "contentId": str(uuid.uuid4()),
-                    "detected_language": self.current_language
+            messages = [
+                {
+                    "role": "system",
+                    "content": """You are a professional business analyst that provides accurate lists of companies.
+                    When given a sector and location, provide real companies that operate in that specific location.
+                    If specific companies are requested, include them first in your response.
+                    If companies are to be excluded, ensure they are not in your suggestions.
+                    If the location is not specific enough or invalid, indicate that in your response."""
+                },
+                {
+                    "role": "user",
+                    "content": f"{custom_instructions} List exactly 20 real companies in the {sector_description} that have significant operations or presence in {geography}. If {geography} is not a valid or specific location, please indicate that. Only provide the company names separated by commas, or indicate if the location is invalid."
                 }
+            ]
 
-            except Exception as e:
-                logger.error(f"Error generating companies: {str(e)}")
+            response = self.client.chat.completions.create(
+                model="gpt-4",
+                messages=messages,
+                temperature=temperature,
+                max_tokens=250
+            )
+
+            content = response.choices[0].message.content
+            if content is None or "invalid" in content.lower() or "didn't specify" in content.lower():
+                logger.info("Invalid or unspecified location")
+                error_message = f"Please provide a more specific location for {sector_description} companies."
                 return {
                     "success": False,
-                    "error": "An error occurred while generating companies",
-                    "contentId": None,
-                    "detected_language": self.current_language
+                    "error": error_message,
+                    "content": [],
+                    "contentId": str(uuid.uuid4())
                 }
 
+            companies = [
+                company.strip()
+                for company in content.split(',')
+                if company.strip() and not company.strip().isspace()
+            ]
 
+            # Filtrar empresas excluidas
+            if excluded_companies:
+                companies = [
+                    company for company in companies 
+                    if not any(excluded.lower() in company.lower() for excluded in excluded_companies)
+                ]
 
+            # Asegurar que las empresas preseleccionadas estén primero
+            if preselected_companies:
+                final_companies = []
+                # Primero las preseleccionadas
+                for company in preselected_companies:
+                    if company not in final_companies:
+                        final_companies.append(company)
+                # Luego el resto hasta completar 20
+                for company in companies:
+                    if company not in final_companies and len(final_companies) < 20:
+                        final_companies.append(company)
+                companies = final_companies
+
+            if len(companies) < 20:
+                logger.warning(f"Received only {len(companies)} companies, requesting more")
+                return self.get_companies_suggestions(
+                    sector, 
+                    geography, 
+                    specific_area,  # Añadir specific_area aquí
+                    preselected_companies,
+                    excluded_companies,
+                    temperature
+                )
+
+            logger.info(f"Successfully generated {len(companies)} companies")
+            if preselected_companies:
+                logger.info(f"Included {len(preselected_companies)} preselected companies")
+            if excluded_companies:
+                logger.info(f"Excluded {len(excluded_companies)} companies")
+
+            return {
+                "success": True,
+                "content": companies[:20],
+                "contentId": str(uuid.uuid4()),
+                "detected_language": self.current_language,
+                "specific_area": specific_area  # Incluir specific_area en la respuesta
+            }
+
+        except Exception as e:
+            logger.error(f"Error generating companies: {str(e)}")
+            return {
+                "success": False,
+                "error": "An error occurred while generating companies",
+                "contentId": None,
+                "detected_language": self.current_language,
+                "specific_area": specific_area  # Incluir specific_area en caso de error
+            }
 
     def extract_expert_name(self, text: str) -> Dict:
         try:
