@@ -274,48 +274,72 @@ class SupplyChainExperienceController:
         print(f"Sector: {data.get('sector', 'Financial Services')}")
         print(f"Region: {data.get('region', 'Europe')}")
         
-        # Obtener empresas de cadena de suministro
-        supply_companies_result = self.chatgpt.get_supply_chain_companies(
-            sector=data.get('sector', 'Financial Services'),
-            geography=data.get('region', 'Europe'),
-            excluded_companies=self.excluded_companies_service.get_excluded_companies()
-        )
+        try:
+            # Obtener empresas excluidas si están disponibles
+            excluded_companies = []
+            try:
+                excluded_companies = self.excluded_companies_service.get_excluded_companies()
+                print(f"Found {len(excluded_companies)} excluded companies")
+            except Exception as e:
+                print(f"Error getting excluded companies: {e}")
         
-        print(f"Supply Companies Result: {supply_companies_result}")
-        
-        if not supply_companies_result['success']:
-            error_message = "Error generating supply chain companies"
-            translated_error = self.chatgpt.translate_message(error_message, detected_language)
+            # Obtener empresas de cadena de suministro
+            supply_companies_result = self.chatgpt.get_supply_chain_companies(
+                sector=data.get('sector', 'Financial Services'),
+                geography=data.get('region', 'Europe'),
+                excluded_companies=excluded_companies
+            )
             
+            print(f"Supply Companies Result Success: {supply_companies_result.get('success', False)}")
+            print(f"Number of companies found: {len(supply_companies_result.get('content', []))}")
+            
+            if not supply_companies_result.get('success', False):
+                error_message = "Error generating supply chain companies"
+                translated_error = self.chatgpt.translate_message(error_message, detected_language)
+                
+                return {
+                    'success': False,
+                    'message': translated_error,
+                    'detected_language': detected_language,
+                    'status_code': 400
+                }
+
+            # Traducir mensajes al idioma detectado
+            inclusion_message = self.chatgpt.translate_message(
+                self.BASE_MESSAGES['positive_response'], 
+                detected_language
+            )
+            
+            prefix_message = self.chatgpt.translate_message(
+                self.BASE_MESSAGES['company_list_prefix'], 
+                detected_language
+            )
+            
+            # Estructura igual a la del endpoint original
+            return {
+                'success': True,
+                'message': inclusion_message,
+                'message_prefix': prefix_message,
+                'detected_language': detected_language,
+                'sector': data.get('sector'),
+                'region': data.get('region'),
+                'suggested_companies': supply_companies_result.get('content', []),
+                'stage': 'response',
+                'status_code': 200
+            }
+        except Exception as e:
+            print(f"Error in _handle_positive_response: {str(e)}")
+            error_message = self.chatgpt.translate_message(
+                self.BASE_MESSAGES['processing_error'],
+                detected_language
+            )
             return {
                 'success': False,
-                'message': translated_error,
-                'detected_language': detected_language
+                'message': error_message,
+                'error': str(e),
+                'detected_language': detected_language,
+                'status_code': 500
             }
-
-        # Traducir mensajes al idioma detectado
-        inclusion_message = self.chatgpt.translate_message(
-            self.BASE_MESSAGES['positive_response'], 
-            detected_language
-        )
-        prefix_message = self.chatgpt.translate_message(
-            self.BASE_MESSAGES['company_list_prefix'], 
-            detected_language
-        )
-        
-        return {
-            'success': True,
-            'message': inclusion_message,
-            'detected_language': detected_language,
-            'include_companies': True,
-            'sector': data.get('sector'),
-            'region': data.get('region'),
-            'additional_info': {
-                'suggested_companies': supply_companies_result.get('content', []),
-                'message_prefix': prefix_message
-            },
-            'stage': 'response'
-        }
 
     def _handle_negative_response(self, detected_language, data):
         """
@@ -339,9 +363,10 @@ class SupplyChainExperienceController:
             'success': True,
             'message': response_message,
             'detected_language': detected_language,
-            'include_companies': False,
+            'suggested_companies': [],
             'sector': data.get('sector'),
-            'region': data.get('region')
+            'region': data.get('region'),
+            'stage': 'response'
         }
 
     def _handle_unclear_response(self, detected_language):

@@ -182,6 +182,32 @@ class ChatGPTHelper:
             previous_language = previous_language or get_last_detected_language()
             print(f"Previous Language: {previous_language}")
 
+            # Criterios para mantener el idioma anterior
+            # 1. Texto muy corto (menos de 6 caracteres)
+            # 2. Texto parece ser una palabra técnica, región o común en múltiples idiomas
+            palabras_ambiguas = [
+                # Tecnologías y sectores
+                'tech', 'it', 'software', 'data', 'cloud', 
+                'web', 'online', 'app', 'net', 'digital',
+                
+                # Regiones
+                'europa', 'europe', 'asia', 'africa', 
+                'america', 'europa', 'norte', 'nord', 
+                'south', 'sur', 'central', 'oeste', 
+                'west', 'east', 'este'
+            ]
+
+            if (len(text) <= 6 or 
+                any(keyword in text.lower() for keyword in palabras_ambiguas)):
+                print(f"Maintaining previous language due to short/ambiguous text")
+                return {
+                    "success": True,
+                    "text": text,
+                    "detected_language": previous_language,
+                    "is_email": '@' in text,
+                    "previous_language": previous_language
+                }
+
             # Preparar mensajes para detección de idioma
             messages = [
                 {
@@ -224,7 +250,7 @@ class ChatGPTHelper:
 
             # Asegurar que sea un código de idioma válido
             if detected_language not in ['es-ES', 'en-US', 'fr-FR', 'de-DE', 'it-IT']:
-                detected_language = 'es-ES'  # Predeterminado a español si no está seguro
+                detected_language = previous_language or 'en-US'
 
             # Actualizar el idioma global
             update_last_detected_language(detected_language)

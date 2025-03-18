@@ -40,7 +40,12 @@ class NameCaptureController:
                 data['text'], 
                 previous_language
             )
-            detected_language = text_processing_result.get('detected_language', 'en')
+            detected_language = text_processing_result.get('detected_language', previous_language)
+
+            # Si el texto es muy corto (menos de 6 caracteres), mantener el idioma anterior
+            if len(data['text']) <= 15:
+                detected_language = previous_language
+
             print(f"Text processing result: {text_processing_result}")
             print(f"Detected language: {detected_language}")
             

@@ -262,25 +262,70 @@ class ClientPerspectiveController:
         
         :param data: Datos de la solicitud
         :param detected_language: Idioma detectado
-        :return: Respuesta procesada
+        :return: Respuesta procesada con lista de empresas sugeridas
         """
         print("\n=== Positive Response Handling ===")
         
-        # Traducir mensaje de respuesta positiva
+        # Obtener empresas del lado del cliente
+        sector = data.get('sector', 'Financial Services')
+        region = data.get('region', 'Europe')
+        
+        # Obtener las empresas excluidas, si hay alguna
+        try:
+            excluded_companies = self.excluded_companies_service.get_excluded_companies()
+            print(f"Found {len(excluded_companies)} excluded companies")
+        except Exception as e:
+            print(f"Error getting excluded companies: {e}")
+            excluded_companies = []
+        
+        # Llamar al servicio ChatGPT para obtener empresas del lado del cliente
+        print(f"Getting client-side companies for sector: {sector}, region: {region}")
+        client_companies_result = self.chatgpt.get_client_side_companies(
+            sector=sector,
+            geography=region,
+            excluded_companies=excluded_companies
+        )
+        
+        # Verificar si la obtención de empresas fue exitosa
+        if not client_companies_result.get('success', False):
+            error_message = self.chatgpt.translate_message(
+                "Error generating client-side companies", 
+                detected_language
+            )
+            print(f"Error getting client companies: {error_message}")
+            return {
+                'success': False,
+                'message': error_message,
+                'detected_language': detected_language,
+                'status_code': 400
+            }
+        
+        # Traducir mensajes de respuesta
         response_message = self.chatgpt.translate_message(
-            self.BASE_MESSAGES['positive_response'], 
+            "Perfect! I will include client-side companies in the search.", 
+            detected_language
+        )
+        
+        message_prefix = self.chatgpt.translate_message(
+            "Here are the recommended companies, with verified companies listed first. Do you agree with this list?",
             detected_language
         )
         
         print(f"Response message: {response_message}")
+        print(f"Message prefix: {message_prefix}")
+        print(f"Found {len(client_companies_result.get('content', []))} suggested companies")
         
         return {
             'success': True,
             'message': response_message,
+            'message_prefix': message_prefix,
             'detected_language': detected_language,
             'include_client_companies': True,
+            'suggested_companies': client_companies_result.get('content', []),
             'sector': data.get('sector'),
-            'region': data.get('region')
+            'region': data.get('region'),
+            'stage': 'response',
+            'status_code': 200
         }
 
     def _handle_negative_response(self, detected_language, data):

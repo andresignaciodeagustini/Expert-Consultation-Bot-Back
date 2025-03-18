@@ -12,8 +12,13 @@ def update_last_detected_language(language):
     """
     global LAST_DETECTED_LANGUAGE
     
-    # Solo actualizar si no es inglés o es un idioma diferente
-    if language and language != 'en-US':
+    # Solo actualizar si:
+    # 1. El idioma no es None
+    # 2. El idioma es diferente al actual
+    # 3. La detección de idioma es confiable (no es un texto muy corto)
+    if (language and 
+        language != LAST_DETECTED_LANGUAGE and 
+        len(str(language)) > 2):
         LAST_DETECTED_LANGUAGE = language
     
     return LAST_DETECTED_LANGUAGE

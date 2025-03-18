@@ -63,7 +63,11 @@ class ExpertConnectionController:
                 text, 
                 current_language
             )
-            detected_language = text_processing_result.get('detected_language', 'en-US')
+            detected_language = text_processing_result.get('detected_language', current_language)
+
+            # Si el texto es muy corto (menos de 6 caracteres), mantener el idioma anterior
+            if len(text) <= 6:
+                detected_language = current_language
 
             # Extracción de intención
             intention_result = self.chatgpt.extract_intention(text)

@@ -38,12 +38,6 @@ class SectorExperienceController:
         }
 
     def process_sector_experience(self, data):
-        """
-        Procesar la experiencia en un sector
-        
-        :param data: Datos de la solicitud
-        :return: Respuesta procesada
-        """
         try:
             # Validar entrada
             validation_result = self.validate_input(data)
@@ -58,31 +52,24 @@ class SectorExperienceController:
             # Obtener el último idioma detectado globalmente
             current_language = get_last_detected_language()
             
-            # Procesamiento de idioma
-            text_processing_result = self.chatgpt.process_text_input(
-                data['sector'], 
-                current_language
-            )
-            detected_language = text_processing_result.get('detected_language', 'en-US')
+            # Usar translate_sector en lugar de extract_sector
+            sector_translation = self.chatgpt.translate_sector(data['sector'])
             
-            # Actualizar idioma global
-            update_last_detected_language(detected_language)
-            
-            # Extracción de sector
-            sector = self.chatgpt.extract_sector(data['sector'])
-            
-            if not sector:
-                error_message = 'Could not identify a valid sector from the provided text'
-                translated_error = self.chatgpt.translate_message(error_message, detected_language)
+            # Manejar casos donde el sector no es válido
+            if not sector_translation['is_valid']:
                 return {
                     'success': False,
-                    'error': translated_error,
+                    'error': sector_translation['available_sectors'],
                     'type': 'bot',
                     'isError': True
                 }
 
+            # Usar el sector traducido
+            sector = sector_translation['translated_sector']
+            displayed_sector = sector_translation['displayed_sector']
+            
             # Generación de respuesta
-            response = self._generate_response(sector, data, detected_language)
+            response = self._generate_response(displayed_sector, data, current_language)
             
             # Añadir campos adicionales para el frontend
             response['type'] = 'bot'
@@ -92,6 +79,7 @@ class SectorExperienceController:
             return response
 
         except Exception as e:
+        # Resto del método permanece igual...
             error_message = self.BASE_MESSAGES['processing_error']
             try:
                 # Obtener el último idioma detectado para traducir el error
