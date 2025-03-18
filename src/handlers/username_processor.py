@@ -184,11 +184,27 @@ INTERNATIONAL_TLDS = {
     'ru': ['ru', 'su', 'рф', 'moscow', 'спб'],
     'other': ['info', 'biz', 'name', 'mobi', 'asia', 'tel', 'pro']
 }
+
 class UsernameProcessor:
-    def __init__(self, client=None):
-        # Inicializar OpenAI
+    _instance = None
+
+    def __new__(cls, client=None):
+        if cls._instance is None:
+            logging.info("Creando nueva instancia de UsernameProcessor")
+            cls._instance = super().__new__(cls)
+            cls._instance._initialize(client)
+        else:
+            logging.info("Reutilizando instancia existente de UsernameProcessor")
+        return cls._instance
+
+    def _initialize(self, client=None):
+        """
+        Método de inicialización único
+        """
         load_dotenv()
+        
         try:
+            # Inicializar OpenAI
             if client:
                 self.client = client
             else:
@@ -196,17 +212,19 @@ class UsernameProcessor:
                 if not api_key:
                     raise ValueError("OPENAI_API_KEY not found in environment variables")
                 self.client = OpenAI(api_key=api_key)
+            
             logger.info("OpenAI client initialized successfully")
-        except Exception as e:
-            logger.error(f"Failed to initialize OpenAI client: {str(e)}")
-            raise
 
-        # Inicializar todas las configuraciones
-        self.symbol_mapping = SYMBOL_MAPPING
-        self.language_patterns = LANGUAGE_PATTERNS
-        self.common_domains = COMMON_DOMAINS
-        self.transliteration_map = TRANSLITERATION_MAP
-        self.international_tlds = INTERNATIONAL_TLDS
+            # Inicializar todas las configuraciones
+            self.symbol_mapping = SYMBOL_MAPPING
+            self.language_patterns = LANGUAGE_PATTERNS
+            self.common_domains = COMMON_DOMAINS
+            self.transliteration_map = TRANSLITERATION_MAP
+            self.international_tlds = INTERNATIONAL_TLDS
+
+        except Exception as e:
+            logger.error(f"Failed to initialize UsernameProcessor: {str(e)}")
+            raise
 
     def _process_with_gpt4(self, text: str) -> str:
         """

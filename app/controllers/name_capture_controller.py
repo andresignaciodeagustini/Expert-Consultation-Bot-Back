@@ -1,40 +1,11 @@
+import traceback
 from src.utils.chatgpt_helper import ChatGPTHelper
+# Importar funciones de gestión de idioma global
+from app.constants.language import get_last_detected_language, update_last_detected_language
 
 class NameCaptureController:
     def __init__(self):
         self.chatgpt = ChatGPTHelper()
-        self.last_detected_language = 'en-US'
-
-    def validate_input(self, data):
-        """
-        Validar datos de entrada
-        
-        :param data: Datos de la solicitud
-        :return: Resultado de validación
-        """
-        if not data:
-            return {
-                'is_valid': False,
-                'error': 'No data provided'
-            }
-        
-        if 'text' not in data:
-            return {
-                'is_valid': False,
-                'error': 'Missing required field: text'
-            }
-        
-        if 'is_registered' not in data:
-            return {
-                'is_valid': False,
-                'error': 'Missing required field: is_registered'
-            }
-        
-        return {
-            'is_valid': True,
-            'text': data['text'],
-            'is_registered': data['is_registered']
-        }
 
     def capture_name(self, data):
         """
@@ -44,108 +15,94 @@ class NameCaptureController:
         :return: Respuesta procesada
         """
         try:
-            # Validar entrada
-            validation_result = self.validate_input(data)
-            if not validation_result['is_valid']:
+            print("\n=== Language Detection Debug ===")
+            # Obtener el último idioma detectado globalmente
+            previous_language = get_last_detected_language()
+            print(f"Previous detected language (global): {previous_language}")
+            
+            # Validar datos de entrada
+            if 'text' not in data or 'is_registered' not in data:
+                print("Error: Missing required fields")
                 return {
                     'success': False,
-                    'error': validation_result['error'],
-                    'status_code': 400
+                    'message': 'Text and registration status are required',
+                    'type': 'bot',
+                    'isError': True
                 }
+
+            print(f"Received data: {data}")
             
-            # Procesar idioma
-            detected_language = self._process_language(validation_result)
-            print(f"Detected Language: {detected_language}")
+            print(f"Language from request: {previous_language}")
             
-            input_text = validation_result['text']
-            is_registered = validation_result['is_registered']
+            # Procesamiento de idioma
+            print("\n=== Language Processing ===")
+            text_processing_result = self.chatgpt.process_text_input(
+                data['text'], 
+                previous_language
+            )
+            detected_language = text_processing_result.get('detected_language', 'en')
+            print(f"Text processing result: {text_processing_result}")
+            print(f"Detected language: {detected_language}")
             
+            # Actualizar idioma global
+            update_last_detected_language(detected_language)
+            print(f"Updated LAST_DETECTED_LANGUAGE to: {detected_language}")
+
             # Extracción de nombre
-            name_extraction_result = self.chatgpt.extract_name(input_text)
-            
+            print("\n=== Name Extraction ===")
+            name_extraction_result = self.chatgpt.extract_name(data['text'])
+            print(f"Name extraction result: {name_extraction_result}")
+
             if not name_extraction_result['success']:
+                print("Error: No valid name found")
                 return {
                     'success': False, 
-                    'error': 'No valid name found in text',
-                    'status_code': 400
+                    'message': 'No valid name found in text',
+                    'type': 'bot',
+                    'isError': True
                 }
 
             name = name_extraction_result['name']
-            
+            is_registered = data['is_registered']
+            print(f"Extracted name: {name}")
+            print(f"Is registered: {is_registered}")
+
             # Generación de respuesta
+            print("\n=== Message Translation ===")
             if is_registered:
                 response = self._handle_registered_user(name, detected_language)
             else:
                 response = self._handle_unregistered_user(name, detected_language)
-            
-            # Añadir código de estado a la respuesta
-            response['status_code'] = 200
-            
+
+            # Añadir campos adicionales para el frontend
+            response['type'] = 'bot'
+            response['companies'] = None
+            response['isError'] = False
+
+            print("\n=== Final Response ===")
+            print(f"Sending response: {response}")
             return response
 
         except Exception as e:
-            error_message = "An error occurred while processing your request."
+            print(f"\n=== Detailed Error Handling ===")
+            print(f"Full error details: {traceback.format_exc()}")
+            
+            error_message = f"An error occurred while processing your request: {str(e)}"
             try:
                 error_message = self.chatgpt.translate_message(
                     error_message, 
-                    self.last_detected_language
+                    previous_language
                 )
             except Exception:
                 pass
 
+            print(f"Translated error message: {error_message}")
             return {
                 'success': False,
                 'error': error_message,
-                'status_code': 500
+                'type': 'bot',
+                'isError': True
             }
-
-    def _process_language(self, data):
-        """
-        Procesar y detectar idioma con priorización de idiomas no ingleses
-        
-        :param data: Datos de la solicitud
-        :return: Idioma detectado
-        """
-        print("\n=== Language Processing ===")
-        print(f"Current last_detected_language: {self.last_detected_language}")
-        
-        try:
-            # Priorizar el idioma si está explícitamente proporcionado
-            if 'detected_language' in data:
-                detected_language = data['detected_language']
-                print(f"Language from data: {detected_language}")
-            
-            # Si hay un texto, procesar su idioma
-            elif 'text' in data:
-                text_processing_result = self.chatgpt.process_text_input(
-                    data['text'], 
-                    self.last_detected_language
-                )
-                detected_language = text_processing_result.get('detected_language', 'en-US')
-                
-                # CLAVE: Priorizar idiomas que NO sean inglés
-                if detected_language != 'en-US':
-                    self.last_detected_language = detected_language
-                
-                print(f"Input text: {data['text']}")
-                print(f"Detected language: {detected_language}")
-            
-            else:
-                # Usar el último idioma detectado o el predeterminado
-                detected_language = self.last_detected_language
-                print("No text provided, using previous language")
-            
-            # Actualizar último idioma detectado
-            self.last_detected_language = detected_language
-            
-            print(f"Final detected language: {detected_language}")
-            return detected_language
-        
-        except Exception as e:
-            print(f"Error in language detection: {e}")
-            # Fallback a inglés en caso de error
-            self.last_detected_language = 'en-US'
-            return 'en-US'
 
     def _handle_registered_user(self, name, detected_language):
         """
@@ -157,9 +114,11 @@ class NameCaptureController:
         """
         base_message = f"Welcome back {name}! Would you like to connect with our experts?"
         translated_message = self.chatgpt.translate_message(base_message, detected_language)
+        print(f"Translated welcome message: {translated_message}")
         
         yes_option = self.chatgpt.translate_message("yes", detected_language)
         no_option = self.chatgpt.translate_message("no", detected_language)
+        print(f"Translated options: yes={yes_option}, no={no_option}")
 
         return {
             'success': True,
@@ -168,7 +127,10 @@ class NameCaptureController:
             'step': 'ask_expert_connection',
             'message': translated_message,
             'next_action': 'provide_expert_answer',
-            'options': [yes_option, no_option]
+            'options': [yes_option, no_option],
+            'type': 'bot',
+            'companies': None,
+            'isError': False
         }
 
     def _handle_unregistered_user(self, name, detected_language):
@@ -181,11 +143,13 @@ class NameCaptureController:
         """
         base_message = f"Thank you {name}! To better assist you, we recommend speaking with one of our agents."
         translated_message = self.chatgpt.translate_message(base_message, detected_language)
+        print(f"Translated thank you message: {translated_message}")
         
         booking_message = self.chatgpt.translate_message(
             "Would you like to schedule a call?",
             detected_language
         )
+        print(f"Translated booking message: {booking_message}")
 
         return {
             'success': True,
@@ -196,14 +160,8 @@ class NameCaptureController:
             'booking_message': booking_message,
             'next_action': 'schedule_call',
             'action_required': 'book_call',
-            'booking_link': "https://calendly.com/your-booking-link"
+            'booking_link': "https://calendly.com/your-booking-link",
+            'type': 'bot',
+            'companies': None,
+            'isError': False
         }
-
-    def reset_last_detected_language(self, language='en-US'):
-        """
-        Resetear el último idioma detectado
-        
-        :param language: Idioma por defecto
-        """
-        print(f"\n=== Resetting Last Detected Language to: {language} ===")
-        self.last_detected_language = language

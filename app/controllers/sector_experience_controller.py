@@ -1,9 +1,10 @@
 from src.utils.chatgpt_helper import ChatGPTHelper
+# Importar funciones de gestión de idioma global
+from app.constants.language import get_last_detected_language, update_last_detected_language, reset_last_detected_language
 
 class SectorExperienceController:
     def __init__(self):
         self.chatgpt = ChatGPTHelper()
-        self.last_detected_language = 'en'
         
         self.BASE_MESSAGES = {
             'sector_received': "Thank you.",
@@ -50,18 +51,22 @@ class SectorExperienceController:
                 return {
                     'success': False,
                     'error': validation_result['error'],
-                    'status_code': 400
+                    'type': 'bot',
+                    'isError': True
                 }
+            
+            # Obtener el último idioma detectado globalmente
+            current_language = get_last_detected_language()
             
             # Procesamiento de idioma
             text_processing_result = self.chatgpt.process_text_input(
                 data['sector'], 
-                self.last_detected_language
+                current_language
             )
-            detected_language = text_processing_result.get('detected_language', 'en')
+            detected_language = text_processing_result.get('detected_language', 'en-US')
             
-            # Actualizar idioma
-            self.last_detected_language = detected_language
+            # Actualizar idioma global
+            update_last_detected_language(detected_language)
             
             # Extracción de sector
             sector = self.chatgpt.extract_sector(data['sector'])
@@ -72,23 +77,29 @@ class SectorExperienceController:
                 return {
                     'success': False,
                     'error': translated_error,
-                    'status_code': 400
+                    'type': 'bot',
+                    'isError': True
                 }
 
             # Generación de respuesta
             response = self._generate_response(sector, data, detected_language)
             
-            # Añadir código de estado a la respuesta
-            response['status_code'] = 200
+            # Añadir campos adicionales para el frontend
+            response['type'] = 'bot'
+            response['companies'] = None
+            response['isError'] = False
             
             return response
 
         except Exception as e:
             error_message = self.BASE_MESSAGES['processing_error']
             try:
+                # Obtener el último idioma detectado para traducir el error
+                current_language = get_last_detected_language()
+                
                 translated_error = self.chatgpt.translate_message(
                     error_message, 
-                    self.last_detected_language
+                    current_language
                 )
             except Exception:
                 translated_error = error_message
@@ -97,7 +108,8 @@ class SectorExperienceController:
                 'success': False,
                 'error': translated_error,
                 'details': str(e),
-                'status_code': 500
+                'type': 'bot',
+                'isError': True
             }
 
     def _generate_response(self, sector, data, detected_language):
@@ -109,19 +121,29 @@ class SectorExperienceController:
         :param detected_language: Idioma detectado
         :return: Diccionario de respuesta
         """
-        # Determinar el siguiente paso
-        if 'specific_area' not in data:
+        # Verificar si hay un área específica
+        if 'specific_area' in data:
+            # Si el área específica es "no" o está vacía
+            if not data['specific_area'] or data['specific_area'].lower() == 'no':
+                base_message = (
+                    f"{self.BASE_MESSAGES['sector_received'].format(sector=sector)} "
+                    f"{self.BASE_MESSAGES['ask_region']}"
+                )
+                next_step = 'region_inquiry'
+            else:
+                # Si hay un área específica definida
+                base_message = (
+                    f"We will include \"{data['specific_area']}\" in our search. "
+                    f"{self.BASE_MESSAGES['ask_region']}"
+                )
+                next_step = 'region_inquiry'
+        else:
+            # Si no se ha proporcionado área específica
             base_message = (
                 f"{self.BASE_MESSAGES['sector_received'].format(sector=sector)} "
                 f"{self.BASE_MESSAGES['ask_specific_area'].format(sector=sector)}"
             )
             next_step = 'specific_area_inquiry'
-        else:
-            base_message = (
-                f"{self.BASE_MESSAGES['sector_received'].format(sector=sector)} "
-                f"{self.BASE_MESSAGES['ask_region']}"
-            )
-            next_step = 'region_inquiry'
 
         # Traducir mensaje
         response_message = self.chatgpt.translate_message(base_message, detected_language)
@@ -151,10 +173,11 @@ class SectorExperienceController:
 
         return response
 
-    def reset_last_detected_language(self, language='en'):
+    def reset_last_detected_language(self, language='en-US'):
         """
         Resetear el último idioma detectado
         
         :param language: Idioma por defecto
         """
-        self.last_detected_language = language
+        print(f"\n=== Resetting Last Detected Language to: {language} ===")
+        reset_last_detected_language()

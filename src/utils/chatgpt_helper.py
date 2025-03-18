@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 import tempfile
 from pathlib import Path
 from unidecode import unidecode
+from app.constants.language import update_last_detected_language, get_last_detected_language
 import requests
 import importlib.util
 import sys
@@ -34,32 +35,22 @@ API_ENDPOINTS = {
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def import_username_processor():
-    """Función auxiliar para importar UsernameProcessor de manera segura"""
-    try:
-        # Intenta primero la importación directa
-        from src.handlers.username_processor import UsernameProcessor
-        return UsernameProcessor
-    except ImportError:
-        try:
-            # Si falla, intenta con path relativo
-            base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            processor_path = os.path.join(base_path, "handlers", "username_processor.py")
-            
-            if not os.path.exists(processor_path):
-                logger.error(f"Username processor not found at: {processor_path}")
-                return None
-                
-            spec = importlib.util.spec_from_file_location("username_processor", processor_path)
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-            return module.UsernameProcessor
-        except Exception as e:
-            logger.error(f"Failed to import UsernameProcessor: {str(e)}")
-            return None
-
 class ChatGPTHelper:
-    def __init__(self):
+    _instance = None
+
+    def __new__(cls):
+        if cls._instance is None:
+            logging.info("Creando nueva instancia de ChatGPTHelper")
+            cls._instance = super().__new__(cls)
+            cls._instance._initialize()
+        else:
+            logging.info("Reutilizando instancia existente de ChatGPTHelper")
+        return cls._instance
+
+    def _initialize(self):
+        """
+        Método de inicialización único
+        """
         load_dotenv()
         self.api_key = os.getenv('OPENAI_API_KEY')
         self.max_retries = 3
@@ -74,7 +65,7 @@ class ChatGPTHelper:
             self.client = OpenAI(api_key=self.api_key)
             
             # Inicializar UsernameProcessor
-            UsernameProcessor = import_username_processor()
+            UsernameProcessor = self._import_username_processor()
             if UsernameProcessor:
                 self.username_processor = UsernameProcessor()
                 logger.info("UsernameProcessor initialized successfully")
@@ -82,13 +73,40 @@ class ChatGPTHelper:
                 logger.warning("UsernameProcessor not available, using fallback processing")
                 self.username_processor = None
             
-            self.test_connection()
+            self._test_connection()
             logger.info("ChatGPT Helper initialized successfully")
         except Exception as e:
             logger.error(f"Failed to initialize service: {str(e)}")
             raise
 
-    def test_connection(self):
+    def _import_username_processor(self):
+        """Función auxiliar para importar UsernameProcessor de manera segura"""
+        try:
+            # Intenta primero la importación directa
+            from src.handlers.username_processor import UsernameProcessor
+            return UsernameProcessor
+        except ImportError:
+            try:
+                # Si falla, intenta con path relativo
+                base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                processor_path = os.path.join(base_path, "handlers", "username_processor.py")
+                
+                if not os.path.exists(processor_path):
+                    logger.error(f"Username processor not found at: {processor_path}")
+                    return None
+                    
+                spec = importlib.util.spec_from_file_location("username_processor", processor_path)
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+                return module.UsernameProcessor
+            except Exception as e:
+                logger.error(f"Failed to import UsernameProcessor: {str(e)}")
+                return None
+
+    def _test_connection(self):
+        """
+        Prueba de conexión con OpenAI
+        """
         try:
             response = self.client.chat.completions.create(
                 model="gpt-3.5-turbo",
@@ -101,8 +119,6 @@ class ChatGPTHelper:
         except Exception as e:
             logger.error(f"Connection test failed: {str(e)}")
             raise
-
-
 
     def detected_language_from_content(self, text: str) -> str:
         try:
@@ -132,7 +148,6 @@ class ChatGPTHelper:
             return "en"
 
     def translate_message(self, message: str, target_language: str) -> str:
-    
         try:
             messages = [
                 {
@@ -156,99 +171,35 @@ class ChatGPTHelper:
         except Exception as e:
             logger.error(f"Translation error: {str(e)}")
             return message  # Retorna el mensaje original si hay error
-            
+    
     def process_text_input(self, text: str, previous_language: str = None) -> Dict:
         try:
             # Log de depuración
             print(f"\n=== Language Detection Debug ===")
             print(f"Input Text: {text}")
+            
+            # Si no se proporciona un idioma previo, obtener el último detectado
+            previous_language = previous_language or get_last_detected_language()
             print(f"Previous Language: {previous_language}")
 
-            context_info = f"Previous detected language: {previous_language}" if previous_language else "No previous language context"
-            
+            # Preparar mensajes para detección de idioma
             messages = [
                 {
                     "role": "system",
-                    "content": f"""You are a specialized language detector for multilingual content with GLOBAL LINGUISTIC EXPERTISE.
-                        CONTEXT INFORMATION: {context_info}
-
-                        Your tasks:
-                        1. Detect the language and return ONLY the precise ISO code (e.g., fr-FR, es-ES, it-IT, en-US, pt-BR)
-                        
-                        2. COMPREHENSIVE GLOBAL LANGUAGE DETECTION:
-                        - Support ALL global languages, including:
-                        * Major languages: Mandarin, Spanish, English, Hindi, Arabic, Portuguese, Bengali, Russian, Japanese
-                        * Regional languages: Swahili, Zulu, Tamil, Telugu, Vietnamese, Thai, Malay
-                        * Indigenous languages: Quechua, Guarani, Inuit languages
-                        * Less common languages: Mongolian, Kazakh, Uzbek, Kirghiz
-
-                        3. VERY SHORT TEXT DEFINITION: 
-                        Examples of very short text:
-                        * "no"
-                        * "yes"
-                        * "email@email.com"
-                        * "hola"
-                        * Single words in ANY language
-                        
-                        - NOT considered very short text:
-                        * "my email"
-                        * "mi correo es"
-                        * "the email is email@test.com"
-                        * "hello there"
-
-                        4. ADVANCED DETECTION RULES:
-                        - If text is VERY SHORT (single word or standalone email), return previous language
-                        - Detect language through:
-                        * Unique character sets
-                        * Grammatical structures
-                        * Phonetic patterns
-                        * Diacritical marks
-                        - If text contains clear language indicators, detect that language
-                        - If text contains email BUT also has words, analyze the surrounding text
-                        - Only override previous language if there's clear language evidence
-                        
-                        5. PRIORITY DETECTION RULES:
-                        - Analyze complete phrases over individual words
-                        - Email addresses should not influence language detection
-                        - Focus on grammatical structure and common words
-                        - When finding proper names, prioritize the surrounding text
-
-                        6. GLOBAL YES/NO REFERENCE TABLE:
-                        English (en-US): yes, yeah, yep, sure, certainly, no, nope, nah
-                        Spanish (es-ES): sí, si, claro, efectivamente, por supuesto, no, nop, para nada
-                        Mandarin (zh-CN): 是的, 对, 不, 不是
-                        Arabic (ar-SA): نعم, لا
-                        Hindi (hi-IN): हाँ, नहीं
-                        Russian (ru-RU): да, нет
-
-                        CRITICAL INSTRUCTIONS: 
-                        - Return ONLY the language code
-                        - For single words, return the previous language
-                        - For standalone emails, return the previous language
-                        - For phrases, detect the actual language
-                        
-                        DETECTION EXAMPLES:
-                        Previous language es-ES:
-                        - "email@test.com" → es-ES (standalone email)
-                        - "no" → es-ES (single word)
-                        - "こんにちは" → ja-JP (Japanese single word)
-                        - "Привет" → ru-RU (Russian single word)
-                        - "mi correo es email@test.com" → es-ES (clear Spanish)
-                        - "my email is email@test.com" → en-US (clear English)
-                        
-                        Previous language en-US:
-                        - "email@test.com" → en-US (standalone email)
-                        - "yes" → en-US (single word)
-                        - "नमस्ते" → hi-IN (Hindi single word)
-                        - "مرحبا" → ar-SA (Arabic single word)
-                        - "my email is email@test.com" → en-US (clear English)
-                        - "mi correo es email@test.com" → es-ES (clear Spanish)"""
-                    },
-                    {
-                        "role": "user",
-                        "content": text
-                    }
-                ]
+                    "content": """You are a specialized language detector. 
+                    Your task is to:
+                    1. Detect the language of the given text
+                    2. Return ONLY the language code (es-ES, en-US, fr-FR, etc.)
+                    3. Consider context and full text for accurate detection
+                    4. If the text is in Spanish, return 'es-ES'
+                    5. If the text is in English, return 'en-US'
+                    6. For other languages, use appropriate ISO codes"""
+                },
+                {
+                    "role": "user",
+                    "content": f"Detect the language code for this text: '{text}'"
+                }
+            ]
 
             # Realizar detección de idioma
             detect_response = self.client.chat.completions.create(
@@ -261,50 +212,40 @@ class ChatGPTHelper:
 
             # Log adicional de depuración
             print(f"Detected Language: {detected_language}")
-            print(f"Is Short Text: {len(text.split()) <= 1 and len(text) <= 10}")
-            print(f"Contains Non-English Characters: {any(ord(char) > 127 for char in text)}")
 
-            # VALIDACIÓN ADICIONAL: Priorizar idiomas no ingleses
-            if detected_language != 'en-US' and detected_language != previous_language:
-                print(f"Forcing non-English language: {detected_language}")
-                return {
-                    "success": True,
-                    "text": text,
-                    "detected_language": detected_language,
-                    "is_email": '@' in text,
-                    "previous_language": detected_language  # Actualizar el idioma anterior
-                }
-            
-            # Forzar uso de idioma previo para textos muy cortos
-            if len(text.split()) <= 1 and len(text) <= 10:
-                print(f"Short text detected. Using previous language: {previous_language}")
-                return {
-                    "success": True,
-                    "text": text,
-                    "detected_language": previous_language or 'en-US',
-                    "is_email": '@' in text,
-                    "previous_language": previous_language
-                }
-            
-            # Si el idioma detectado es inglés, 
-            # o es igual al idioma anterior, 
-            # usar el idioma anterior o inglés
+            # Validaciones y ajustes
+            if not detected_language or detected_language == '':
+                # Método de detección alternativo
+                if any('á' in text.lower() or 'é' in text.lower() or 'í' in text.lower() or 
+                    'ó' in text.lower() or 'ú' in text.lower()):
+                    detected_language = 'es-ES'
+                else:
+                    detected_language = previous_language or 'en-US'
+
+            # Asegurar que sea un código de idioma válido
+            if detected_language not in ['es-ES', 'en-US', 'fr-FR', 'de-DE', 'it-IT']:
+                detected_language = 'es-ES'  # Predeterminado a español si no está seguro
+
+            # Actualizar el idioma global
+            update_last_detected_language(detected_language)
+            print(f"Final detected language: {detected_language}")
+
             return {
                 "success": True,
                 "text": text,
-                "detected_language": previous_language or detected_language,
+                "detected_language": detected_language,
                 "is_email": '@' in text,
                 "previous_language": previous_language
             }
 
         except Exception as e:
-            logger.error(f"Error detecting language: {str(e)}")
+            print(f"Error detecting language: {str(e)}")
             return {
                 "success": False,
-                "detected_language": previous_language if previous_language else "en-US",
+                "detected_language": previous_language or "en-US",
                 "error": str(e)
             }
-
+        
     def detect_multilingual_region(self, text: str, previous_language: str = None) -> Dict:
         """
         Detectar región y lenguaje de manera multilingüe

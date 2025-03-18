@@ -1,9 +1,10 @@
 from src.utils.chatgpt_helper import ChatGPTHelper
+# Importar funciones de gestión de idioma global
+from app.constants.language import get_last_detected_language, update_last_detected_language, reset_last_detected_language
 
 class ExpertConnectionController:
     def __init__(self):
         self.chatgpt = ChatGPTHelper()
-        self.last_detected_language = 'en'
 
     def validate_input(self, data):
         """
@@ -54,15 +55,15 @@ class ExpertConnectionController:
             text = validation_result['text']
             name = validation_result['name']
             
+            # Obtener el último idioma detectado
+            current_language = get_last_detected_language()
+            
             # Procesamiento de idioma
             text_processing_result = self.chatgpt.process_text_input(
                 text, 
-                self.last_detected_language
+                current_language
             )
-            detected_language = text_processing_result.get('detected_language', 'en')
-            
-            # Actualizar idioma
-            self.last_detected_language = detected_language
+            detected_language = text_processing_result.get('detected_language', 'en-US')
 
             # Extracción de intención
             intention_result = self.chatgpt.extract_intention(text)
@@ -90,11 +91,14 @@ class ExpertConnectionController:
             return response
 
         except Exception as e:
+            # Obtener el último idioma detectado para traducir el error
+            current_language = get_last_detected_language()
+            
             error_message = "An error occurred while processing your request."
             try:
                 error_message = self.chatgpt.translate_message(
                     error_message, 
-                    self.last_detected_language
+                    current_language
                 )
             except Exception:
                 pass
@@ -115,7 +119,7 @@ class ExpertConnectionController:
         :return: Diccionario de respuesta
         """
         if intention == 'yes':
-            base_message = f"¡Excelente! ¿En qué sector estás más interesado? Puedes elegir entre sectores como Tecnología, Salud, Finanzas, Educación, o cualquier otro sector que te interese."
+            base_message = f"Excellent! Please tell me about the sector or field you are most interested in exploring with our experts."
             translated_message = self.chatgpt.translate_message(base_message, detected_language)
             
             return {
@@ -151,10 +155,11 @@ class ExpertConnectionController:
                 'step': 'clarify'
             }
 
-    def reset_last_detected_language(self, language='en'):
+    def reset_last_detected_language(self, language='en-US'):
         """
         Resetear el último idioma detectado
         
         :param language: Idioma por defecto
         """
-        self.last_detected_language = language
+        print(f"\n=== Resetting Last Detected Language to: {language} ===")
+        reset_last_detected_language()

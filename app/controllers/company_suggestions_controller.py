@@ -1,14 +1,19 @@
 from src.utils.chatgpt_helper import ChatGPTHelper
 from src.services.external.zoho_services import ZohoService
 import logging
+# Importar funciones de gestión de idioma global
+from app.constants.language import (
+    get_last_detected_language, 
+    update_last_detected_language, 
+    reset_last_detected_language
+)
 
 class CompanySuggestionsController:
     def __init__(self):
         self.chatgpt = ChatGPTHelper()
         self.zoho_service = ZohoService()
-        self.last_detected_language = 'en-US'
-        self.excluded_companies = set()
         self.logger = logging.getLogger(__name__)
+        self.excluded_companies = set()
 
     def validate_input(self, data):
         """
@@ -55,7 +60,7 @@ class CompanySuggestionsController:
                 return {
                     'success': False,
                     'error': validation_result['error'],
-                    'language': self.last_detected_language,
+                    'language': get_last_detected_language(),
                     'status_code': 400
                 }
             
@@ -94,7 +99,7 @@ class CompanySuggestionsController:
             return {
                 'success': False,
                 'error': error_message,
-                'language': self.last_detected_language,
+                'language': get_last_detected_language(),
                 'status_code': 500
             }
 
@@ -104,25 +109,45 @@ class CompanySuggestionsController:
         
         :param validation_result: Resultado de validación de entrada
         """
+        # Obtener el idioma actual
+        current_language = get_last_detected_language()
+
         # Priorizar idioma detectado en los datos
         if validation_result.get('detected_language'):
-            self.last_detected_language = validation_result['detected_language']
+            update_last_detected_language(validation_result['detected_language'])
             return
 
         # Intentar detectar idioma usando sector y región
         try:
+            # Texto para detección de idioma
+            text_to_detect = (
+                f"{validation_result.get('sector', '')} "
+                f"{validation_result.get('region', '')} "
+                f"{validation_result.get('specific_area', '')}"
+            ).strip()
+
+            # Si no hay texto suficiente, mantener el idioma actual
+            if not text_to_detect:
+                return
+
+            # Detección de idioma
             language_detection = self.chatgpt.detect_multilingual_region(
-                f"{validation_result.get('sector', '')} {validation_result.get('region', '')}",
-                self.last_detected_language
+                text_to_detect,
+                current_language
             )
             
             # Actualizar idioma si la detección fue exitosa
             if language_detection.get('success', False):
-                self.last_detected_language = language_detection.get('detected_language', 'en-US')
+                detected_language = language_detection.get('detected_language', current_language)
+                
+                # Solo actualizar si el idioma detectado es diferente y no es inglés por defecto
+                if detected_language != current_language and detected_language != 'en-US':
+                    update_last_detected_language(detected_language)
+            
         except Exception as e:
             self.logger.warning(f"Language detection failed: {str(e)}")
-            # Mantener el idioma actual o usar inglés por defecto
-            self.last_detected_language = self.last_detected_language or 'en-US'
+            # Mantener el idioma actual
+            # No forzar cambio a inglés si ya hay un idioma establecido
 
     def _get_companies_suggestions(self, sector, region, specific_area, preselected_companies):
         """
@@ -155,8 +180,8 @@ class CompanySuggestionsController:
         :param preselected_companies: Empresas preseleccionadas
         :return: Diccionario de respuesta
         """
-        # Asegurar que last_detected_language tenga un valor
-        language = self.last_detected_language or 'en-US'
+        # Obtener el idioma actual
+        language = get_last_detected_language() or 'en-US'
 
         # Obtener candidatos de Zoho
         all_candidates = self.zoho_service.get_candidates()
@@ -172,7 +197,7 @@ class CompanySuggestionsController:
         # Mensaje base para diferentes idiomas
         base_messages = {
             'en-US': "Here are the recommended companies, with verified companies listed first. Do you agree with this list?",
-            'es-ES': "Aquí están las empresas recomendadas, con las empresas verificadas primero. ¿Está de acuerdo con esta lista?"
+            # Añadir más idiomas según sea necesario
         }
 
         # Seleccionar y traducir mensaje
@@ -251,5 +276,5 @@ class CompanySuggestionsController:
         
         :param language: Idioma por defecto
         """
-        self.last_detected_language = language
+        reset_last_detected_language()
         self.logger.info(f"Last detected language reset to: {language}")

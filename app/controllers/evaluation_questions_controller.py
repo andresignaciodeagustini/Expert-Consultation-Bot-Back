@@ -1,9 +1,14 @@
 from src.utils.chatgpt_helper import ChatGPTHelper
+# Importar funciones de gestión de idioma global
+from app.constants.language import (
+    get_last_detected_language, 
+    update_last_detected_language, 
+    reset_last_detected_language
+)
 
 class EvaluationQuestionsController:
     def __init__(self, chatgpt=None):
         self.chatgpt = chatgpt or ChatGPTHelper()
-        self.last_detected_language = 'en-US'
         
         self.BASE_MESSAGES = {
             'ask_preference': "Would you like to add evaluation questions for the project?",
@@ -58,6 +63,24 @@ class EvaluationQuestionsController:
         try:
             print("\n=== Processing Evaluation Questions ===")
             
+            # Importante: Verificar si hay un idioma explícito en los datos
+            if data and isinstance(data, dict):
+                if 'language' in data:
+                    explicit_language = data['language']
+                    print(f"Using explicit language from data: {explicit_language}")
+                    update_last_detected_language(explicit_language)
+                elif 'detected_language' in data:
+                    explicit_language = data['detected_language']
+                    print(f"Using detected_language from data: {explicit_language}")
+                    update_last_detected_language(explicit_language)
+                # Verificar en filtersApplied dentro de phase3_data
+                elif 'phase3_data' in data and isinstance(data['phase3_data'], dict):
+                    filters = data['phase3_data'].get('filtersApplied', {})
+                    if filters and isinstance(filters, dict) and 'detected_language' in filters:
+                        explicit_language = filters['detected_language']
+                        print(f"Using language from phase3_data.filtersApplied: {explicit_language}")
+                        update_last_detected_language(explicit_language)
+            
             # Validar entrada
             validation_result = self.validate_input(data)
             if not validation_result['is_valid']:
@@ -67,9 +90,12 @@ class EvaluationQuestionsController:
                     'status_code': 400
                 }
             
-            # Procesar idioma
+            # Procesar idioma usando el método mejorado
             detected_language = self._process_language(validation_result['data'])
             print(f"Detected Language: {detected_language}")
+            
+            # IMPORTANTE: Asegurarse de que el idioma detectado se actualice correctamente
+            update_last_detected_language(detected_language)
             
             # Extraer datos validados
             answer = validation_result['data'].get('answer', '')
@@ -95,60 +121,81 @@ class EvaluationQuestionsController:
             print(f"\n=== Error in process_evaluation_questions ===")
             print(f"Error details: {str(e)}")
             
-            error_message = "An error occurred while processing your request."
-            translated_error = self._translate_message(error_message, self.last_detected_language)
+            # Usar el mensaje base y traducirlo si es necesario
+            current_language = get_last_detected_language()
+            error_message = self._translate_message(
+                self.BASE_MESSAGES['processing_error'], 
+                current_language
+            )
 
             return {
                 'success': False,
-                'error': translated_error,
+                'error': error_message,
                 'details': str(e),
-                'detected_language': self.last_detected_language,
+                'detected_language': current_language,
                 'status_code': 500
             }
 
     def _process_language(self, data):
         """
-        Procesar y detectar idioma
+        Procesar y detectar idioma con método mejorado
         
         :param data: Datos de la solicitud
         :return: Idioma detectado
         """
         print("\n=== Language Processing ===")
-        print(f"Current last_detected_language: {self.last_detected_language}")
+        current_language = get_last_detected_language()
+        print(f"Current detected language: {current_language}")
         
         try:
             # Priorizar el idioma si está explícitamente proporcionado
             if 'detected_language' in data:
                 detected_language = data['detected_language']
                 print(f"Language from data: {detected_language}")
+                update_last_detected_language(detected_language)
+                return detected_language
+            
+            # También verificar si hay un idioma en 'language'
+            if 'language' in data:
+                detected_language = data['language']
+                print(f"Language from data 'language' field: {detected_language}")
+                update_last_detected_language(detected_language)
+                return detected_language
             
             # Si hay una respuesta, procesar su idioma
-            elif 'answer' in data:
+            if 'answer' in data:
+                # Manejar casos especiales de palabras cortas
+                answer = data['answer'].strip().lower()
+                if answer in ['no', 'n', 'yes', 'y', 'si', 'sí']:
+                    print(f"Special case word detected: '{answer}'. Maintaining current language: {current_language}")
+                    return current_language
+                
+                # Para respuestas normales, usar la detección
                 text_processing_result = self.chatgpt.process_text_input(
                     data['answer'], 
-                    self.last_detected_language
+                    current_language
                 )
-                detected_language = text_processing_result.get('detected_language', 'en-US')
+                detected_language = text_processing_result.get('detected_language', current_language)
                 
                 print(f"Input answer: {data['answer']}")
                 print(f"Detected language: {detected_language}")
+                
+                # CLAVE: Mantener el idioma original de la conversación
+                if detected_language != current_language:
+                    print(f"Language detection attempted to change from {current_language} to {detected_language}")
+                    detected_language = current_language
+                
+                # Actualizar el último idioma detectado
+                update_last_detected_language(detected_language)
+                
+                return detected_language
             
-            else:
-                # Usar el último idioma detectado o el predeterminado
-                detected_language = self.last_detected_language
-                print("No answer provided, using previous language")
-            
-            # Actualizar último idioma detectado
-            self.last_detected_language = detected_language
-            
-            print(f"Final detected language: {detected_language}")
-            return detected_language
+            # Usar el último idioma detectado o el predeterminado
+            return current_language
         
         except Exception as e:
             print(f"Error in language detection: {e}")
-            # Fallback a inglés en caso de error
-            self.last_detected_language = 'en-US'
-            return 'en-US'
+            return current_language
 
     def _request_initial_perspective(self, detected_language, data):
         """
@@ -161,16 +208,18 @@ class EvaluationQuestionsController:
         print("\n=== Initial Perspective Request ===")
         print(f"Detected language: {detected_language}")
         
-        # Traducir el mensaje base
-        original_message = self.BASE_MESSAGES['ask_preference']
-        translated_message = self._translate_message(original_message, detected_language)
+        # Traducir el mensaje base al idioma detectado
+        initial_message = self._translate_message(
+            self.BASE_MESSAGES['ask_preference'], 
+            detected_language
+        )
         
-        print(f"Original message: {original_message}")
-        print(f"Translated message: {translated_message}")
+        print(f"Base message: {self.BASE_MESSAGES['ask_preference']}")
+        print(f"Translated message: {initial_message}")
         
         return {
             'success': True,
-            'message': translated_message,
+            'message': initial_message,
             'detected_language': detected_language,
             'sector': data.get('sector'),
             'region': data.get('region'),
@@ -179,23 +228,34 @@ class EvaluationQuestionsController:
 
     def _process_perspective_response(self, data, detected_language):
         """
-        Procesar respuesta de perspectiva
+        Procesar respuesta de perspectiva con comprobación directa
         
         :param data: Datos de la solicitud
         :param detected_language: Idioma detectado
         :return: Respuesta procesada
         """
         print("\n=== Perspective Response Processing ===")
-        print(f"Input answer: {data['answer']}")
-        print(f"Detected language: {detected_language}")
+        answer = data['answer'].strip().lower()
+        print(f"Input answer: '{answer}'")
+        print(f"Using language: {detected_language}")
         
-        # Extraer intención
-        intention_result = self.chatgpt.extract_intention(data['answer'])
-        print(f"Intention extraction result: {intention_result}")
+        # Detectar directamente respuestas negativas comunes
+        if answer in ['no', 'n', 'nope', 'no,', 'noo']:
+            print("Direct negative response detected")
+            return self._handle_negative_response(detected_language, data)
+            
+        # Detectar directamente respuestas positivas comunes
+        if answer in ['yes', 'y', 'yeah', 'yep', 'si', 'sí', 'yes,', 'yess']:
+            print("Direct positive response detected")
+            return self._handle_positive_response(data, detected_language)
         
+        # Para respuestas más complejas, usar el chatgpt para extraer la intención
+        intention_result = self.chatgpt.extract_intention(answer)
         intention = intention_result.get('intention') if intention_result.get('success') else None
+        
         print(f"Extracted intention: {intention}")
 
+        # Manejar respuesta basado en la intención
         if intention == 'yes':
             return self._handle_positive_response(data, detected_language)
         elif intention == 'no':
@@ -218,6 +278,8 @@ class EvaluationQuestionsController:
             self.BASE_MESSAGES['confirmed_yes'], 
             detected_language
         )
+        
+        print(f"Response message: {confirmation_message}")
         
         return {
             'success': True,
@@ -248,6 +310,8 @@ class EvaluationQuestionsController:
             detected_language
         )
         
+        print(f"Response message: {confirmation_message}")
+        
         return {
             'success': True,
             'message': confirmation_message,
@@ -272,6 +336,8 @@ class EvaluationQuestionsController:
             detected_language
         )
         
+        print(f"Response message: {clarification_message}")
+        
         return {
             'success': False,
             'message': clarification_message,
@@ -286,4 +352,4 @@ class EvaluationQuestionsController:
         :param language: Idioma por defecto
         """
         print(f"\n=== Resetting Last Detected Language to: {language} ===")
-        self.last_detected_language = language
+        reset_last_detected_language()

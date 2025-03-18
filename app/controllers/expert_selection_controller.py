@@ -1,5 +1,11 @@
 from app.services.expert_selection_service import ExpertSelectionService
 from src.utils.chatgpt_helper import ChatGPTHelper
+# Importar funciones de gestión de idioma global
+from app.constants.language import (
+    get_last_detected_language, 
+    update_last_detected_language, 
+    reset_last_detected_language
+)
 
 class ExpertSelectionController:
     def __init__(self, expert_selection_service=None, chatgpt=None):
@@ -8,7 +14,6 @@ class ExpertSelectionController:
             ExpertSelectionService()
         )
         self.chatgpt = chatgpt or ChatGPTHelper()
-        self.last_detected_language = 'en'
 
         self.BASE_MESSAGES = {
             'no_data': "No data provided for expert selection.",
@@ -152,10 +157,10 @@ class ExpertSelectionController:
             print(f"Error Details: {str(e)}")
             
             # Procesar idioma para el mensaje de error
-            detected_language = self._process_language(data)
+            current_language = get_last_detected_language()
             error_message = self.chatgpt.translate_message(
                 self.BASE_MESSAGES['processing_error'], 
-                detected_language
+                current_language
             )
             
             return {
@@ -163,7 +168,7 @@ class ExpertSelectionController:
                 'message': error_message,
                 'error': str(e),
                 'status_code': 500,
-                'detected_language': detected_language
+                'detected_language': current_language
             }
 
     def _process_language(self, data):
@@ -174,7 +179,8 @@ class ExpertSelectionController:
         :return: Idioma detectado
         """
         print("\n=== Language Processing ===")
-        print(f"Current last_detected_language: {self.last_detected_language}")
+        current_language = get_last_detected_language()
+        print(f"Current detected language: {current_language}")
         
         # Intentar obtener texto para detección de idioma
         text_to_detect = ' '.join([
@@ -185,13 +191,16 @@ class ExpertSelectionController:
         
         text_processing_result = self.chatgpt.process_text_input(
             text_to_detect if text_to_detect.strip() else "test", 
-            self.last_detected_language
+            current_language
         )
         detected_language = text_processing_result.get('detected_language', 'en')
         
         print(f"Detected language: {detected_language}")
         
-        self.last_detected_language = detected_language
+        # Actualizar idioma si es diferente de inglés
+        if detected_language != 'en':
+            update_last_detected_language(detected_language)
+        
         return detected_language
 
     def reset_last_detected_language(self, language='en'):
@@ -201,4 +210,4 @@ class ExpertSelectionController:
         :param language: Idioma por defecto
         """
         print(f"\n=== Resetting Last Detected Language to: {language} ===")
-        self.last_detected_language = language
+        reset_last_detected_language()

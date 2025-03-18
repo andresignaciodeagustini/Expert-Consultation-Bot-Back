@@ -1,6 +1,7 @@
 from flask import Flask, request
 from flask_cors import CORS
 from config.settings import DevelopmentConfig
+import logging
 
 # Importaciones de utilidades
 from app.utils.environment import (
@@ -25,6 +26,11 @@ from src.services.external.zoho_services import ZohoService
 from src.handlers.voice_handler import VoiceHandler
 from src.utils.chatgpt_helper import ChatGPTHelper
 from app.services.server_monitoring_service import ServerMonitoringService
+
+# Configurar logging
+logging.basicConfig(level=logging.INFO, 
+                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 def create_app(config_class=DevelopmentConfig):
     # Configurar rutas del proyecto
@@ -66,21 +72,37 @@ def create_app(config_class=DevelopmentConfig):
             response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
         return response
     
-    # Inicializar servicios globales (opcional)
-    print("\n=== Initializing Global Services ===")
-    global_services = {
-        'zoho_service': ZohoService(verify_token=True),
-        'voice_handler': VoiceHandler(),
-        'chatgpt': ChatGPTHelper()
-    }
+    # Inicializar servicios globales con Singleton
+    logger.info("\n=== Initializing Global Services ===")
     
-    for service_name, service_instance in global_services.items():
-        app.config[service_name] = service_instance
-        print(f"Initialized {service_name}")
+    try:
+        # Crear instancias singleton de servicios
+        zoho_service = ZohoService(verify_token=True)
+        voice_handler = VoiceHandler()
+        chatgpt_helper = ChatGPTHelper()
+
+        # Almacenar servicios en la configuración de la app
+        global_services = {
+            'zoho_service': zoho_service,
+            'voice_handler': voice_handler,
+            'chatgpt': chatgpt_helper
+        }
+        
+        for service_name, service_instance in global_services.items():
+            app.config[service_name] = service_instance
+            logger.info(f"Initialized {service_name}")
+    
+    except Exception as e:
+        logger.error(f"Error initializing services: {e}")
+        raise
     
     # Inicializar servicio de monitoreo
-    monitoring_service = ServerMonitoringService()
-    monitoring_service.start_keep_alive()
+    try:
+        monitoring_service = ServerMonitoringService()
+        monitoring_service.start_keep_alive()
+        logger.info("Server monitoring service started")
+    except Exception as e:
+        logger.error(f"Error starting monitoring service: {e}")
     
     # Definir blueprints de forma más clara
     blueprints_config = [

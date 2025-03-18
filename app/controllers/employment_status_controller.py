@@ -1,11 +1,16 @@
 from src.utils.chatgpt_helper import ChatGPTHelper
 from src.services.external.zoho_services import ZohoService
+# Importar funciones de gestión de idioma global
+from app.constants.language import (
+    get_last_detected_language, 
+    update_last_detected_language, 
+    reset_last_detected_language
+)
 
 class EmploymentStatusController:
     def __init__(self):
         self.chatgpt = ChatGPTHelper()
         self.zoho_service = ZohoService()
-        self.last_detected_language = 'en-US'
         
         self.BASE_MESSAGES = {
             'ask_preference': "Would you prefer experts who currently work at these companies, who worked there previously, or both options?",
@@ -56,6 +61,7 @@ class EmploymentStatusController:
                 return {
                     'success': False,
                     'error': validation_result['error'],
+                    'detected_language': get_last_detected_language(),
                     'status_code': 400
                 }
             
@@ -89,64 +95,57 @@ class EmploymentStatusController:
             
             error_message = self.chatgpt.translate_message(
                 self.BASE_MESSAGES['processing_error'], 
-                self.last_detected_language
+                get_last_detected_language()
             )
             
             return {
                 'success': False,
                 'message': error_message,
                 'error': str(e),
-                'detected_language': self.last_detected_language,
+                'detected_language': get_last_detected_language(),
                 'status_code': 500
             }
 
     def _process_language(self, data):
         """
-        Procesar y detectar idioma con priorización de idiomas no ingleses
+        Procesar y detectar idioma de manera menos agresiva
         
         :param data: Datos de la solicitud
         :return: Idioma detectado
         """
         print("\n=== Language Processing ===")
-        print(f"Current last_detected_language: {self.last_detected_language}")
+        current_language = get_last_detected_language()
+        print(f"Current detected language: {current_language}")
         
         try:
             # Priorizar el idioma si está explícitamente proporcionado
             if 'detected_language' in data:
                 detected_language = data['detected_language']
                 print(f"Language from data: {detected_language}")
+                return detected_language
             
             # Si hay un estado, procesar su idioma
             elif 'status' in data:
                 text_processing_result = self.chatgpt.process_text_input(
                     data['status'], 
-                    self.last_detected_language
+                    current_language
                 )
-                detected_language = text_processing_result.get('detected_language', 'en-US')
-                
-                # CLAVE: Priorizar idiomas que NO sean inglés
-                if detected_language != 'en-US':
-                    self.last_detected_language = detected_language
+                detected_language = text_processing_result.get('detected_language', current_language)
                 
                 print(f"Input status: {data['status']}")
                 print(f"Detected language: {detected_language}")
+                
+                return detected_language
             
             else:
                 # Usar el último idioma detectado o el predeterminado
-                detected_language = self.last_detected_language or 'en-US'
                 print("No status provided, using previous language")
-            
-            # Actualizar último idioma detectado
-            self.last_detected_language = detected_language
-            
-            print(f"Final detected language: {detected_language}")
-            return detected_language
+                return current_language
         
         except Exception as e:
             print(f"Error in language detection: {e}")
-            # Fallback a inglés en caso de error
-            self.last_detected_language = 'en-US'
-            return 'en-US'
+            # Fallback al idioma actual en caso de error
+            return current_language
 
     def _request_initial_preference(self, detected_language):
         """
@@ -329,4 +328,4 @@ class EmploymentStatusController:
         :param language: Idioma por defecto
         """
         print(f"\n=== Resetting Last Detected Language to: {language} ===")
-        self.last_detected_language = language
+        reset_last_detected_language()

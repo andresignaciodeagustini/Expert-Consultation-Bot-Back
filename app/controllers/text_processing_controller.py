@@ -1,10 +1,11 @@
 import logging
 from src.utils.chatgpt_helper import ChatGPTHelper
+# Importar funciones de gestión de idioma global
+from app.constants.language import get_last_detected_language, update_last_detected_language, reset_last_detected_language
 
 class TextProcessingController:
     def __init__(self):
         self.chatgpt = ChatGPTHelper()
-        self.last_detected_language = 'en-US'
         self.logger = logging.getLogger(__name__)
         
         self.BASE_MESSAGES = {
@@ -57,10 +58,13 @@ class TextProcessingController:
             
             input_text = validation_result['text']
             
+            # Obtener el último idioma detectado globalmente
+            current_language = get_last_detected_language()
+            
             # Detección multilingüe de región
             region_detection = self.chatgpt.detect_multilingual_region(
                 input_text, 
-                self.last_detected_language
+                current_language
             )
             
             # Verificar si la detección de región fue exitosa
@@ -70,16 +74,16 @@ class TextProcessingController:
                 # Usar detección de idioma de respaldo
                 text_processing_result = self.chatgpt.process_text_input(
                     input_text, 
-                    self.last_detected_language
+                    current_language
                 )
                 
-                detected_language = text_processing_result.get('detected_language', self.last_detected_language)
+                detected_language = text_processing_result.get('detected_language', 'en-US')
             else:
                 # Usar el idioma detectado por la detección multilingüe
-                detected_language = region_detection.get('detected_language', self.last_detected_language)
+                detected_language = region_detection.get('detected_language', 'en-US')
             
-            # Actualizar último idioma detectado
-            self.last_detected_language = detected_language
+            # Actualizar idioma globalmente
+            update_last_detected_language(detected_language)
             
             # Registro de idioma detectado
             self.logger.info(f"Detected language: {detected_language}")
@@ -135,20 +139,23 @@ class TextProcessingController:
             self.logger.error(error_message, exc_info=True)
             
             try:
+                # Obtener el último idioma detectado globalmente para traducir el error
+                current_language = get_last_detected_language()
+                
                 # Intentar traducir mensaje de error
                 translated_error = self.chatgpt.translate_message(
                     self.BASE_MESSAGES['processing_error'], 
-                    detected_language if 'detected_language' in locals() else self.last_detected_language
+                    current_language
                 )
             except Exception:
                 translated_error = "An unexpected error occurred"
-                detected_language = self.last_detected_language
+                current_language = 'en-US'
 
             return {
                 'success': False,
                 'error': translated_error,
                 'details': str(e),
-                'detected_language': detected_language,
+                'detected_language': current_language,
                 'status_code': 500
             }
 
@@ -158,5 +165,5 @@ class TextProcessingController:
         
         :param language: Idioma por defecto
         """
-        self.last_detected_language = language
+        reset_last_detected_language()
         self.logger.info(f"Last detected language reset to: {language}")

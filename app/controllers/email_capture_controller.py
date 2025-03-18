@@ -2,11 +2,12 @@ import logging
 from flask import jsonify
 from src.utils.chatgpt_helper import ChatGPTHelper
 from app.services.registration_service import RegistrationService
+# Importar funciones de gestión de idioma global
+from app.constants.language import get_last_detected_language, update_last_detected_language, reset_last_detected_language
 
 class EmailCaptureController:
     def __init__(self):
         self.chatgpt = ChatGPTHelper()
-        self.last_detected_language = 'en'
         self.logger = logging.getLogger(__name__)
 
     def validate_input(self, data):
@@ -67,15 +68,18 @@ class EmailCaptureController:
 
             email = email_extraction_result['email']
             
+            # Obtener el último idioma detectado
+            current_language = get_last_detected_language()
+            
             # Procesamiento de idioma
             text_processing_result = self.chatgpt.process_text_input(
                 input_text, 
-                self.last_detected_language
+                current_language
             )
-            detected_language = text_processing_result.get('detected_language', 'en')
+            detected_language = text_processing_result.get('detected_language', 'en-US')
             
-            # Actualizar idioma
-            self.last_detected_language = detected_language
+            # Actualizar idioma global
+            update_last_detected_language(detected_language)
             
             # Verificar registro
             is_registered = RegistrationService.is_email_registered(email)
@@ -117,10 +121,13 @@ class EmailCaptureController:
             self.logger.error(error_message, exc_info=True)
             
             try:
+                # Obtener el último idioma detectado para traducir el error
+                current_language = get_last_detected_language()
+                
                 # Intentar traducir mensaje de error
                 translated_error = self.chatgpt.translate_message(
                     "An error occurred while processing your request.", 
-                    self.last_detected_language
+                    current_language
                 )
             except Exception:
                 translated_error = "An unexpected error occurred"
@@ -130,11 +137,11 @@ class EmailCaptureController:
                 'error': translated_error
             }
 
-    def reset_last_detected_language(self, language='en'):
+    def reset_last_detected_language(self, language='en-US'):
         """
         Resetear el último idioma detectado
         
         :param language: Idioma por defecto
         """
-        self.last_detected_language = language
+        reset_last_detected_language()
         self.logger.info(f"Last detected language reset to: {language}")

@@ -1,17 +1,22 @@
 from src.utils.chatgpt_helper import ChatGPTHelper
+# Importar funciones de gestión de idioma global
+from app.constants.language import (
+    get_last_detected_language, 
+    update_last_detected_language, 
+    reset_last_detected_language
+)
 
 class EvaluationQuestionsSectionsController:
     def __init__(self, chatgpt=None):
         self.chatgpt = chatgpt or ChatGPTHelper()
-        self.last_detected_language = 'en-US'
         
-        self.BASE_MESSAGES = {
-            'ask_preference': "Would you like to add sections for evaluation questions?",
-            'confirmed_yes': "Great! Let's define the sections for evaluation questions.",
-            'confirmed_no': "Understood. We will use default evaluation question sections.",
-            'processing_error': "An error occurred while processing evaluation question sections.",
-            'invalid_response': "Could not determine your preference. Please answer yes or no."
+        self.CATEGORY_MESSAGES = {
+            'main': "Please provide screening questions for main companies in the sector.",
+            'client': "Please provide screening questions for client companies.",
+            'supply_chain': "Please provide screening questions for supply chain companies."
         }
+        
+        self.COMPLETION_MESSAGE = "All screening questions have been successfully gathered."
 
     def _translate_message(self, message, detected_language):
         """
@@ -25,7 +30,7 @@ class EvaluationQuestionsSectionsController:
 
     def validate_input(self, data):
         """
-        Validar datos de entrada
+        Validar campos de entrada
         
         :param data: Datos de la solicitud
         :return: Resultado de validación
@@ -38,9 +43,15 @@ class EvaluationQuestionsSectionsController:
                 'error': 'No data provided'
             }
         
-        # Normalizar entrada
-        if 'text' in data and 'answer' not in data:
-            data['answer'] = data['text']
+        required_fields = ['sector', 'region', 'selected_categories']
+        missing_fields = [field for field in required_fields if field not in data]
+        
+        if missing_fields:
+            print(f"Missing required fields: {', '.join(missing_fields)}")
+            return {
+                'is_valid': False,
+                'error': f'Missing required fields: {", ".join(missing_fields)}'
+            }
         
         print(f"Received data: {data}")
         return {
@@ -58,6 +69,24 @@ class EvaluationQuestionsSectionsController:
         try:
             print("\n=== Processing Evaluation Questions Sections ===")
             
+            # Importante: Verificar si hay un idioma explícito en los datos
+            if data and isinstance(data, dict):
+                if 'language' in data:
+                    explicit_language = data['language']
+                    print(f"Using explicit language from data: {explicit_language}")
+                    update_last_detected_language(explicit_language)
+                elif 'detected_language' in data:
+                    explicit_language = data['detected_language']
+                    print(f"Using detected_language from data: {explicit_language}")
+                    update_last_detected_language(explicit_language)
+                # Verificar en filtersApplied dentro de phase3_data
+                elif 'phase3_data' in data and isinstance(data['phase3_data'], dict):
+                    filters = data['phase3_data'].get('filtersApplied', {})
+                    if filters and isinstance(filters, dict) and 'detected_language' in filters:
+                        explicit_language = filters['detected_language']
+                        print(f"Using language from phase3_data.filtersApplied: {explicit_language}")
+                        update_last_detected_language(explicit_language)
+            
             # Validar entrada
             validation_result = self.validate_input(data)
             if not validation_result['is_valid']:
@@ -67,21 +96,15 @@ class EvaluationQuestionsSectionsController:
                     'status_code': 400
                 }
             
-            # Procesar idioma
+            # Procesar idioma usando el método mejorado
             detected_language = self._process_language(validation_result['data'])
             print(f"Detected Language: {detected_language}")
             
-            # Extraer datos validados
-            answer = validation_result['data'].get('answer', '')
-            stage = validation_result['data'].get('stage', 'initial_question')
+            # IMPORTANTE: Asegurarse de que el idioma detectado se actualice correctamente
+            update_last_detected_language(detected_language)
             
-            # Manejar diferentes etapas
-            if not answer:
-                print("No answer provided, requesting initial perspective")
-                response = self._request_initial_perspective(detected_language, validation_result['data'])
-            else:
-                print(f"Processing answer: {answer}")
-                response = self._process_perspective_response(validation_result['data'], detected_language)
+            # Procesar preguntas
+            response = self._process_questions(validation_result['data'], detected_language)
             
             # Añadir código de estado a la respuesta
             response['status_code'] = 200 if response.get('success', False) else 400
@@ -95,195 +118,232 @@ class EvaluationQuestionsSectionsController:
             print(f"\n=== Error in process_evaluation_questions_sections ===")
             print(f"Error details: {str(e)}")
             
-            error_message = "An error occurred while processing your request."
-            translated_error = self._translate_message(error_message, self.last_detected_language)
-
-            return {
-                'success': False,
-                'error': translated_error,
-                'details': str(e),
-                'detected_language': self.last_detected_language,
-                'status_code': 500
-            }
+            error_response = self._handle_error(e, get_last_detected_language())
+            error_response['status_code'] = 500
+            return error_response
 
     def _process_language(self, data):
         """
-        Procesar y detectar idioma
+        Procesar y detectar idioma con método mejorado
         
         :param data: Datos de la solicitud
         :return: Idioma detectado
         """
         print("\n=== Language Processing ===")
-        print(f"Current last_detected_language: {self.last_detected_language}")
+        current_language = get_last_detected_language()
+        print(f"Current detected language: {current_language}")
         
         try:
             # Priorizar el idioma si está explícitamente proporcionado
             if 'detected_language' in data:
                 detected_language = data['detected_language']
                 print(f"Language from data: {detected_language}")
+                update_last_detected_language(detected_language)
+                return detected_language
+            
+            # También verificar si hay un idioma en 'language'
+            if 'language' in data:
+                detected_language = data['language']
+                print(f"Language from data 'language' field: {detected_language}")
+                update_last_detected_language(detected_language)
+                return detected_language
             
             # Si hay una respuesta, procesar su idioma
-            elif 'answer' in data:
+            if 'answer' in data:
+                # Para respuestas normales, usar la detección
                 text_processing_result = self.chatgpt.process_text_input(
                     data['answer'], 
-                    self.last_detected_language
+                    current_language
                 )
-                detected_language = text_processing_result.get('detected_language', 'en-US')
+                detected_language = text_processing_result.get('detected_language', current_language)
                 
                 print(f"Input answer: {data['answer']}")
                 print(f"Detected language: {detected_language}")
+                
+                # CLAVE: Mantener el idioma original de la conversación
+                if detected_language != current_language:
+                    print(f"Language detection attempted to change from {current_language} to {detected_language}")
+                    detected_language = current_language
+                
+                # Actualizar el último idioma detectado
+                update_last_detected_language(detected_language)
+                
+                return detected_language
             
-            else:
-                # Usar el último idioma detectado o el predeterminado
-                detected_language = self.last_detected_language
-                print("No answer provided, using previous language")
-            
-            # Actualizar último idioma detectado
-            self.last_detected_language = detected_language
-            
-            print(f"Final detected language: {detected_language}")
-            return detected_language
+            # Usar el último idioma detectado o el predeterminado
+            return current_language
         
         except Exception as e:
             print(f"Error in language detection: {e}")
-            # Fallback a inglés en caso de error
-            self.last_detected_language = 'en-US'
-            return 'en-US'
+            return current_language
 
-    def _request_initial_perspective(self, detected_language, data):
+    def _process_questions(self, data, detected_language):
         """
-        Solicitar perspectiva inicial
+        Procesar preguntas de evaluación
         
-        :param detected_language: Idioma detectado
         :param data: Datos de la solicitud
-        :return: Respuesta inicial
+        :param detected_language: Idioma detectado
+        :return: Respuesta procesada
         """
-        print("\n=== Initial Perspective Request ===")
-        print(f"Detected language: {detected_language}")
+        print("\n=== Processing Questions ===")
+        current_questions = data.get('current_questions', {})
+        selected_categories = data.get('selected_categories', {})
+        current_category = data.get('current_category')
+        answer = data.get('answer')
+        client_perspective = data.get('clientPerspective', False)
+        supply_chain_perspective = data.get('supplyChainPerspective', False)
+
+        print(f"Current category: {current_category}")
+        print(f"Answer received: {answer}")
+        print(f"Client perspective: {client_perspective}")
+        print(f"Supply chain perspective: {supply_chain_perspective}")
+
+        # Guardar respuesta si existe
+        if current_category and answer:
+            print(f"Saving answer for category: {current_category}")
+            current_questions[current_category] = answer
+
+        # Determinar categorías pendientes
+        pending_categories = self._determine_pending_categories(
+            selected_categories, 
+            current_questions, 
+            client_perspective, 
+            supply_chain_perspective
+        )
+        print(f"Pending categories: {pending_categories}")
+
+        # Generar respuesta
+        if pending_categories:
+            return self._generate_pending_response(
+                pending_categories, 
+                current_questions, 
+                detected_language
+            )
+        else:
+            return self._generate_completion_response(
+                current_questions, 
+                detected_language
+            )
+
+    def _determine_pending_categories(
+        self, 
+        selected_categories, 
+        current_questions, 
+        client_perspective, 
+        supply_chain_perspective
+    ):
+        """
+        Determinar categorías pendientes
         
-        # Traducir el mensaje base
-        original_message = self.BASE_MESSAGES['ask_preference']
-        translated_message = self._translate_message(original_message, detected_language)
+        :param selected_categories: Categorías seleccionadas
+        :param current_questions: Preguntas actuales
+        :param client_perspective: Perspectiva de cliente
+        :param supply_chain_perspective: Perspectiva de cadena de suministro
+        :return: Lista de categorías pendientes
+        """
+        pending_categories = []
         
-        print(f"Original message: {original_message}")
+        if selected_categories.get('main', False) and 'main' not in current_questions:
+            pending_categories.append('main')
+        
+        if (selected_categories.get('client', False) and 
+            'client' not in current_questions and 
+            client_perspective):
+            pending_categories.append('client')
+        
+        if (selected_categories.get('supply_chain', False) and 
+            'supply_chain' not in current_questions and 
+            supply_chain_perspective):
+            pending_categories.append('supply_chain')
+        
+        return pending_categories
+
+    def _generate_pending_response(
+        self, 
+        pending_categories, 
+        current_questions, 
+        detected_language
+    ):
+        """
+        Generar respuesta para categorías pendientes
+        
+        :param pending_categories: Categorías pendientes
+        :param current_questions: Preguntas actuales
+        :param detected_language: Idioma detectado
+        :return: Respuesta de categorías pendientes
+        """
+        print("\n=== Generating Pending Response ===")
+        next_category = pending_categories[0]
+        message = self.CATEGORY_MESSAGES.get(next_category)
+        translated_message = self._translate_message(message, detected_language)
+        
+        print(f"Next category: {next_category}")
+        print(f"Original message: {message}")
         print(f"Translated message: {translated_message}")
         
         return {
             'success': True,
+            'status': 'pending',
             'message': translated_message,
-            'detected_language': detected_language,
-            'sector': data.get('sector'),
-            'region': data.get('region'),
-            'stage': 'initial_question'
+            'current_category': next_category,
+            'remaining_categories': pending_categories[1:],
+            'completed_categories': list(current_questions.keys()),
+            'current_questions': current_questions,
+            'detected_language': detected_language
         }
 
-    def _process_perspective_response(self, data, detected_language):
+    def _generate_completion_response(self, current_questions, detected_language):
         """
-        Procesar respuesta de perspectiva
+        Generar respuesta de finalización
         
-        :param data: Datos de la solicitud
+        :param current_questions: Preguntas actuales
         :param detected_language: Idioma detectado
-        :return: Respuesta procesada
+        :return: Respuesta de finalización
         """
-        print("\n=== Perspective Response Processing ===")
-        print(f"Input answer: {data['answer']}")
-        print(f"Detected language: {detected_language}")
-        
-        # Extraer intención
-        intention_result = self.chatgpt.extract_intention(data['answer'])
-        print(f"Intention extraction result: {intention_result}")
-        
-        intention = intention_result.get('intention') if intention_result.get('success') else None
-        print(f"Extracted intention: {intention}")
-
-        if intention == 'yes':
-            return self._handle_positive_response(data, detected_language)
-        elif intention == 'no':
-            return self._handle_negative_response(detected_language, data)
-        else:
-            return self._handle_unclear_response(detected_language)
-
-    def _handle_positive_response(self, data, detected_language):
-        """
-        Manejar respuesta positiva
-        
-        :param data: Datos de la solicitud
-        :param detected_language: Idioma detectado
-        :return: Respuesta procesada
-        """
-        print("\n=== Positive Response Handling ===")
-        
-        # Traducir mensaje de confirmación
-        confirmation_message = self._translate_message(
-            self.BASE_MESSAGES['confirmed_yes'], 
+        print("\n=== Generating Completion Response ===")
+        translated_message = self._translate_message(
+            self.COMPLETION_MESSAGE, 
             detected_language
         )
+        
+        print(f"Original message: {self.COMPLETION_MESSAGE}")
+        print(f"Translated message: {translated_message}")
         
         return {
             'success': True,
-            'message': confirmation_message,
-            'detected_language': detected_language,
-            'include_companies': True,
-            'sector': data.get('sector'),
-            'region': data.get('region'),
-            'additional_info': {
-                'sections_required': True,
-                'stage': 'define_sections'
-            }
+            'status': 'completed',
+            'message': translated_message,
+            'screening_questions': current_questions,
+            'detected_language': detected_language
         }
 
-    def _handle_negative_response(self, detected_language, data):
+    def _handle_error(self, error, detected_language):
         """
-        Manejar respuesta negativa
+        Manejar errores generales
         
+        :param error: Excepción ocurrida
         :param detected_language: Idioma detectado
-        :param data: Datos de la solicitud
-        :return: Respuesta procesada
+        :return: Respuesta de error
         """
-        print("\n=== Negative Response Handling ===")
+        print(f"\n=== Error Handling ===")
+        error_message = "An error occurred while processing your request."
+        translated_error = self._translate_message(error_message, detected_language)
         
-        # Traducir mensaje de confirmación
-        confirmation_message = self._translate_message(
-            self.BASE_MESSAGES['confirmed_no'], 
-            detected_language
-        )
-        
-        return {
-            'success': True,
-            'message': confirmation_message,
-            'detected_language': detected_language,
-            'include_companies': False,
-            'sector': data.get('sector'),
-            'region': data.get('region')
-        }
-
-    def _handle_unclear_response(self, detected_language):
-        """
-        Manejar respuesta poco clara
-        
-        :param detected_language: Idioma detectado
-        :return: Respuesta procesada
-        """
-        print("\n=== Unclear Response Handling ===")
-        
-        # Traducir mensaje de aclaración
-        clarification_message = self._translate_message(
-            self.BASE_MESSAGES['invalid_response'], 
-            detected_language
-        )
+        print(f"Error: {str(error)}")
+        print(f"Translated error message: {translated_error}")
         
         return {
             'success': False,
-            'message': clarification_message,
-            'detected_language': detected_language,
-            'stage': 'clarification'
+            'message': translated_error,
+            'error': str(error),
+            'detected_language': detected_language
         }
 
-    def reset_last_detected_language(self, language='en-US'):
+    def reset_language(self, language='en'):
         """
-        Resetear el último idioma detectado
+        Resetear el idioma detectado
         
         :param language: Idioma por defecto
         """
-        print(f"\n=== Resetting Last Detected Language to: {language} ===")
-        self.last_detected_language = language
+        print(f"\n=== Resetting Language to: {language} ===")
+        reset_last_detected_language(language)
