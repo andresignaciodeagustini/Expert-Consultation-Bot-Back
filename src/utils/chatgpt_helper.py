@@ -159,75 +159,96 @@ class ChatGPTHelper:
             
     def process_text_input(self, text: str, previous_language: str = None) -> Dict:
         try:
+            # Log de depuración
+            print(f"\n=== Language Detection Debug ===")
+            print(f"Input Text: {text}")
+            print(f"Previous Language: {previous_language}")
+
             context_info = f"Previous detected language: {previous_language}" if previous_language else "No previous language context"
             
             messages = [
                 {
                     "role": "system",
-                    "content": f"""You are a specialized language detector for multilingual content.
-                    CONTEXT INFORMATION: {context_info}
+                    "content": f"""You are a specialized language detector for multilingual content with GLOBAL LINGUISTIC EXPERTISE.
+                        CONTEXT INFORMATION: {context_info}
 
-                    Your tasks:
-                    1. Detect the language and return ONLY the precise ISO code (e.g., fr-FR, es-ES, it-IT, en-US, pt-BR)
-                    
-                    2. IMPORTANT CONTEXT RULES:
-                    - VERY SHORT TEXT DEFINITION: Only single words or standalone email addresses
-                    Examples of very short text:
-                    * "no"
-                    * "yes"
-                    * "email@email.com"
-                    * "hola"
-                    
-                    - NOT considered very short text:
-                    * "my email"
-                    * "mi correo es"
-                    * "the email is email@email.com"
-                    * "hello there"
+                        Your tasks:
+                        1. Detect the language and return ONLY the precise ISO code (e.g., fr-FR, es-ES, it-IT, en-US, pt-BR)
+                        
+                        2. COMPREHENSIVE GLOBAL LANGUAGE DETECTION:
+                        - Support ALL global languages, including:
+                        * Major languages: Mandarin, Spanish, English, Hindi, Arabic, Portuguese, Bengali, Russian, Japanese
+                        * Regional languages: Swahili, Zulu, Tamil, Telugu, Vietnamese, Thai, Malay
+                        * Indigenous languages: Quechua, Guarani, Inuit languages
+                        * Less common languages: Mongolian, Kazakh, Uzbek, Kirghiz
 
-                    - If text is VERY SHORT (single word or standalone email), return previous language
-                    - If text contains clear language indicators (like "my email is", "mi correo es"), detect that language
-                    - If text contains email BUT also has words, analyze the surrounding text
-                    - Only override previous language if there's clear language evidence
-                    
-                    3. PRIORITY RULES:
-                    - Always analyze complete phrases over individual words
-                    - Email addresses should not influence language detection
-                    - Focus on grammatical structure and common words
-                    - When finding proper names, prioritize the surrounding text
+                        3. VERY SHORT TEXT DEFINITION: 
+                        Examples of very short text:
+                        * "no"
+                        * "yes"
+                        * "email@email.com"
+                        * "hola"
+                        * Single words in ANY language
+                        
+                        - NOT considered very short text:
+                        * "my email"
+                        * "mi correo es"
+                        * "the email is email@test.com"
+                        * "hello there"
 
-                    4. YES/NO REFERENCE TABLE (use for language detection):
-                    English (en-US): yes, yeah, yep, sure, certainly, no, nope, nah
-                    Spanish (es-ES): sí, si, claro, efectivamente, por supuesto, no, nop, para nada
-                    [... resto de la tabla igual ...]
+                        4. ADVANCED DETECTION RULES:
+                        - If text is VERY SHORT (single word or standalone email), return previous language
+                        - Detect language through:
+                        * Unique character sets
+                        * Grammatical structures
+                        * Phonetic patterns
+                        * Diacritical marks
+                        - If text contains clear language indicators, detect that language
+                        - If text contains email BUT also has words, analyze the surrounding text
+                        - Only override previous language if there's clear language evidence
+                        
+                        5. PRIORITY DETECTION RULES:
+                        - Analyze complete phrases over individual words
+                        - Email addresses should not influence language detection
+                        - Focus on grammatical structure and common words
+                        - When finding proper names, prioritize the surrounding text
 
-                    IMPORTANT: 
-                    - Return ONLY the language code
-                    - For single words, return the previous language
-                    - For standalone emails, return the previous language
-                    - For phrases, detect the actual language
-                    
-                    Examples with context:
-                    Previous language es-ES:
-                    - "email@test.com" → es-ES (standalone email)
-                    - "no" → es-ES (single word)
-                    - "mi correo es email@test.com" → es-ES (clear Spanish)
-                    - "my email is email@test.com" → en-US (clear English)
-                    - "hello" → es-ES (single word)
-                    - "hello there" → en-US (clear English phrase)
-                    
-                    Previous language en-US:
-                    - "email@test.com" → en-US (standalone email)
-                    - "yes" → en-US (single word)
-                    - "my email is email@test.com" → en-US (clear English)
-                    - "mi correo es email@test.com" → es-ES (clear Spanish)
-                    - "hola" → en-US (single word)
-                    - "hola amigo" → es-ES (clear Spanish phrase)"""
-                },
-                {
-                    "role": "user",
-                    "content": text
-                }
-            ]
+                        6. GLOBAL YES/NO REFERENCE TABLE:
+                        English (en-US): yes, yeah, yep, sure, certainly, no, nope, nah
+                        Spanish (es-ES): sí, si, claro, efectivamente, por supuesto, no, nop, para nada
+                        Mandarin (zh-CN): 是的, 对, 不, 不是
+                        Arabic (ar-SA): نعم, لا
+                        Hindi (hi-IN): हाँ, नहीं
+                        Russian (ru-RU): да, нет
+
+                        CRITICAL INSTRUCTIONS: 
+                        - Return ONLY the language code
+                        - For single words, return the previous language
+                        - For standalone emails, return the previous language
+                        - For phrases, detect the actual language
+                        
+                        DETECTION EXAMPLES:
+                        Previous language es-ES:
+                        - "email@test.com" → es-ES (standalone email)
+                        - "no" → es-ES (single word)
+                        - "こんにちは" → ja-JP (Japanese single word)
+                        - "Привет" → ru-RU (Russian single word)
+                        - "mi correo es email@test.com" → es-ES (clear Spanish)
+                        - "my email is email@test.com" → en-US (clear English)
+                        
+                        Previous language en-US:
+                        - "email@test.com" → en-US (standalone email)
+                        - "yes" → en-US (single word)
+                        - "नमस्ते" → hi-IN (Hindi single word)
+                        - "مرحبا" → ar-SA (Arabic single word)
+                        - "my email is email@test.com" → en-US (clear English)
+                        - "mi correo es email@test.com" → es-ES (clear Spanish)"""
+                    },
+                    {
+                        "role": "user",
+                        "content": text
+                    }
+                ]
 
             # Realizar detección de idioma
             detect_response = self.client.chat.completions.create(
@@ -237,11 +258,41 @@ class ChatGPTHelper:
             )
             
             detected_language = detect_response.choices[0].message.content.strip()
+
+            # Log adicional de depuración
+            print(f"Detected Language: {detected_language}")
+            print(f"Is Short Text: {len(text.split()) <= 1 and len(text) <= 10}")
+            print(f"Contains Non-English Characters: {any(ord(char) > 127 for char in text)}")
+
+            # VALIDACIÓN ADICIONAL: Priorizar idiomas no ingleses
+            if detected_language != 'en-US' and detected_language != previous_language:
+                print(f"Forcing non-English language: {detected_language}")
+                return {
+                    "success": True,
+                    "text": text,
+                    "detected_language": detected_language,
+                    "is_email": '@' in text,
+                    "previous_language": detected_language  # Actualizar el idioma anterior
+                }
             
+            # Forzar uso de idioma previo para textos muy cortos
+            if len(text.split()) <= 1 and len(text) <= 10:
+                print(f"Short text detected. Using previous language: {previous_language}")
+                return {
+                    "success": True,
+                    "text": text,
+                    "detected_language": previous_language or 'en-US',
+                    "is_email": '@' in text,
+                    "previous_language": previous_language
+                }
+            
+            # Si el idioma detectado es inglés, 
+            # o es igual al idioma anterior, 
+            # usar el idioma anterior o inglés
             return {
                 "success": True,
                 "text": text,
-                "detected_language": detected_language,
+                "detected_language": previous_language or detected_language,
                 "is_email": '@' in text,
                 "previous_language": previous_language
             }
@@ -254,9 +305,134 @@ class ChatGPTHelper:
                 "error": str(e)
             }
 
-
-
-
+    def detect_multilingual_region(self, text: str, previous_language: str = None) -> Dict:
+        """
+        Detectar región y lenguaje de manera multilingüe
+        
+        :param text: Texto a analizar
+        :param previous_language: Idioma detectado previamente
+        :return: Diccionario con información de detección
+        """
+        try:
+            # Preprocesar texto
+            text = text.lower().strip()
+            
+            # Mapeo multilingüe de regiones
+            multilingual_regions = {
+                'europe': {
+                    'translations': {
+                        'es': ['europa', 'europeo', 'europea'],
+                        'en': ['europe', 'european'],
+                        'fr': ['europe', 'européen', 'européenne'],
+                        'de': ['europa', 'europäisch'],
+                        'it': ['europa', 'europeo', 'europea'],
+                        'pt': ['europa', 'europeu', 'europeia'],
+                        'ru': ['европа', 'европейский'],
+                        'pl': ['europa', 'europejski'],
+                        'nl': ['europa', 'europees'],
+                        'el': ['ευρώπη', 'ευρωπαϊκός'],
+                        'ar': ['أوروبا', 'أوروبي'],
+                        'zh': ['欧洲', '欧洲的']
+                    },
+                    'iso_code': 'Europe'
+                },
+                'north america': {
+                    'translations': {
+                        'es': ['norteamérica', 'norte de america', 'america del norte'],
+                        'en': ['north america', 'north american'],
+                        'fr': ['amérique du nord', 'nord-américain'],
+                        'pt': ['norte da america', 'america do norte'],
+                        'it': ['nord america', 'nord americano'],
+                        'de': ['nordamerika', 'nordamerikanisch'],
+                        'ru': ['северная америка', 'североамериканский'],
+                        'ar': ['أمريكا الشمالية'],
+                        'zh': ['北美', '北美洲']
+                    },
+                    'iso_code': 'North America'
+                },
+                'asia': {
+                    'translations': {
+                        'es': ['asia', 'asiático', 'asiática'],
+                        'en': ['asia', 'asian'],
+                        'fr': ['asie', 'asiatique'],
+                        'ru': ['азия', 'азиатский'],
+                        'ar': ['آسيا', 'آسيوي'],
+                        'hi': ['एशिया', 'एशियाई'],
+                        'zh': ['亚洲', '亚洲的'],
+                        'ja': ['アジア', 'アジア人'],
+                        'ko': ['아시아', '아시아인']
+                    },
+                    'iso_code': 'Asia'
+                }
+            }
+            
+            # Mapeo de códigos de idioma a códigos ISO
+            lang_mapping = {
+                'es': 'es-ES', 'en': 'en-US', 'fr': 'fr-FR', 
+                'it': 'it-IT', 'de': 'de-DE', 'pt': 'pt-PT',
+                'ru': 'ru-RU', 'ar': 'ar-SA', 'hi': 'hi-IN',
+                'zh': 'zh-CN', 'ja': 'ja-JP', 'ko': 'ko-KR',
+                'el': 'el-GR', 'pl': 'pl-PL', 'nl': 'nl-NL'
+            }
+            
+            # Función para buscar coincidencias
+            def find_region_match(text):
+                for region, region_data in multilingual_regions.items():
+                    for lang, translations in region_data['translations'].items():
+                        if text in [t.lower() for t in translations]:
+                            return {
+                                'region': region_data['iso_code'],
+                                'language': lang_mapping.get(lang, f'{lang}-{lang.upper()}')
+                            }
+                return None
+            
+            # Buscar coincidencia
+            region_match = find_region_match(text)
+            
+            if region_match:
+                return {
+                    'success': True,
+                    'text': text,
+                    'detected_language': region_match['language'],
+                    'region': region_match['region'],
+                    'previous_language': previous_language
+                }
+            
+            # Si no se encuentra coincidencia, intentar detección de idioma
+            try:
+                from langdetect import detect
+                
+                detected_lang = detect(text)
+                detected_language = lang_mapping.get(detected_lang, f'{detected_lang}-{detected_lang.upper()}')
+                
+                return {
+                    'success': False,
+                    'text': text,
+                    'detected_language': detected_language,
+                    'region': None,
+                    'previous_language': previous_language,
+                    'message': 'No region detected'
+                }
+            
+            except Exception:
+                # Fallback al idioma anterior
+                return {
+                    'success': False,
+                    'text': text,
+                    'detected_language': previous_language or 'en-US',
+                    'region': None,
+                    'previous_language': previous_language,
+                    'message': 'Language detection failed'
+                }
+        
+        except Exception as e:
+            logger.error(f"Error in multilingual region detection: {str(e)}")
+            return {
+                'success': False,
+                'error': str(e),
+                'detected_language': previous_language or 'en-US',
+                'previous_language': previous_language
+            }
 
 
 
@@ -341,32 +517,107 @@ class ChatGPTHelper:
 
     def identify_region(self, location: str) -> Dict:
         try:
-            logger.info(f"Identifying region for location: {location}")
-
+            # Preprocesar la ubicación
+            location = location.lower().strip()
+            
+            # Mapeo directo de ubicaciones
+            region_mapping = {
+                # Europa
+                'europa': 'Europe',
+                'europe': 'Europe',
+                'españa': 'Europe',
+                'spain': 'Europe',
+                'madrid': 'Europe',
+                'barcelona': 'Europe',
+                'france': 'Europe',
+                'paris': 'Europe',
+                'germany': 'Europe',
+                'berlin': 'Europe',
+                'italia': 'Europe',
+                'italy': 'Europe',
+                'rome': 'Europe',
+                'london': 'Europe',
+                'uk': 'Europe',
+                'united kingdom': 'Europe',
+                'portugal': 'Europe',
+                'netherlands': 'Europe',
+                'amsterdam': 'Europe',
+                
+                # Norte América
+                'usa': 'North America',
+                'united states': 'North America',
+                'canada': 'North America',
+                'mexico': 'North America',
+                'new york': 'North America',
+                'california': 'North America',
+                
+                # Asia
+                'china': 'Asia',
+                'japan': 'Asia',
+                'india': 'Asia',
+                'tokyo': 'Asia',
+                'beijing': 'Asia',
+                'seoul': 'Asia',
+                'singapore': 'Asia'
+            }
+            
+            # Verificación directa
+            if location in region_mapping:
+                return {
+                    "success": True,
+                    "region": region_mapping[location],
+                    "original_location": location
+                }
+            
+            # Verificación parcial
+            for key, region in region_mapping.items():
+                if key in location:
+                    return {
+                        "success": True,
+                        "region": region,
+                        "original_location": location
+                    }
+            
+            # Usar IA como último recurso
             messages = [
                 {
                     "role": "system",
-                    "content": "You are a geography expert. You must categorize locations into one of these regions: North America, Europe, or Asia. Only respond with one of these three options."
+                    "content": """
+                    You are an advanced geography expert. 
+                    Categorize locations into these regions: 
+                    - North America
+                    - Europe
+                    - Asia
+                    
+                    Strict rules:
+                    - Be extremely precise in region identification
+                    - Consider historical, cultural, and geographical context
+                    - If location is ambiguous or not clearly in these regions, respond with 'Uncertain'
+                    - Prioritize the most likely region based on the input
+                    """
                 },
                 {
                     "role": "user",
-                    "content": f"Which region (North America, Europe, or Asia) does {location} belong to? Only respond with the region name."
+                    "content": f"Determine the EXACT region for this location: {location}. Respond ONLY with the region name or 'Uncertain'."
                 }
             ]
 
             response = self.client.chat.completions.create(
                 model="gpt-4",
                 messages=messages,
-                temperature=0.3
+                temperature=0.2  # Reducir variabilidad
             )
 
             region = response.choices[0].message.content.strip()
 
-            if region not in ["North America", "Europe", "Asia"]:
-                logger.warning(f"Invalid region response: {region}")
+            # Validación final
+            valid_regions = ["North America", "Europe", "Asia"]
+            if region not in valid_regions:
+                logger.warning(f"Uncertain region for location: {location}")
                 return {
                     "success": False,
-                    "error": f"Invalid region: {region}"
+                    "error": f"Could not determine region for {location}",
+                    "original_location": location
                 }
 
             logger.info(f"Location '{location}' identified as {region}")
@@ -377,12 +628,15 @@ class ChatGPTHelper:
             }
 
         except Exception as e:
-            logger.error(f"Error identifying region: {str(e)}")
+            logger.error(f"Comprehensive error identifying region: {str(e)}")
             return {
                 "success": False,
-                "error": str(e)
+                "error": str(e),
+                "original_location": location
             }
         
+
+
 
     def get_companies_suggestions(
         self,

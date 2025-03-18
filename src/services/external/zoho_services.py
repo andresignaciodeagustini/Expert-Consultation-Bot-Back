@@ -36,17 +36,29 @@ class TokenManager:
         self.client_id = os.getenv('ZOHO_CLIENT_ID')
         self.client_secret = os.getenv('ZOHO_CLIENT_SECRET')
         self.environment = os.getenv('ENVIRONMENT', 'development')
-        self._last_refresh_time = None
-        self._refresh_cooldown = timedelta(seconds=30)
+        
+        # Añadir un seguimiento del último refresco
+        self._last_token_refresh = None
+        self._token_refresh_cooldown = timedelta(minutes=10)  # Cooldown de 10 minutos
+
+    def should_refresh_token(self):
+        """
+        Determina si es necesario refrescar el token
+        """
+        if self._last_token_refresh is None:
+            return True
+        
+        time_since_last_refresh = datetime.now() - self._last_token_refresh
+        return time_since_last_refresh > self._token_refresh_cooldown
 
     @retry_with_backoff(retries=3, backoff_in_seconds=2)
     def refresh_zoho_token(self):
-        try:
-            if (self._last_refresh_time and 
-                datetime.now() - self._last_refresh_time < self._refresh_cooldown):
-                print("Token refresh attempted too soon, waiting for cooldown...")
-                time.sleep(self._refresh_cooldown.total_seconds())
+        # Verificar si realmente necesitamos refrescar
+        if not self.should_refresh_token():
+            print("Token refresh skipped. Recent refresh exists.")
+            return None
 
+        try:
             print("\n=== Refreshing Zoho Recruit Token ===")
             refresh_url = "https://accounts.zoho.com/oauth/v2/token"
             
@@ -59,7 +71,10 @@ class TokenManager:
             }
             
             response = requests.post(refresh_url, params=params)
-            self._last_refresh_time = datetime.now()
+            
+            # Actualizar el momento del último refresco
+            self._last_token_refresh = datetime.now()
+            
             print(f"Refresh Status: {response.status_code}")
             
             if response.status_code == 200:
@@ -85,14 +100,28 @@ class TokenManager:
                         print(f"Error updating .env file: {str(e)}")
                 
                 return new_token
+            
             print(f"Error refreshing token: {response.text}")
             return None
+        
         except Exception as e:
             print(f"Exception in refresh_zoho_token: {str(e)}")
             return None
 
 class ZohoService:
-    def __init__(self):
+    _instance = None
+
+    def __new__(cls, verify_token=True):
+        if not cls._instance:
+            cls._instance = super(ZohoService, cls).__new__(cls)
+            cls._instance._initialized = False
+        return cls._instance
+
+    def __init__(self, verify_token=True):
+        # Si ya se inicializó, no hacer nada
+        if self._initialized:
+            return
+        
         print("\n=== ZohoService Initialization ===")
         env_path = get_env_path()
         load_dotenv(env_path)
@@ -106,7 +135,11 @@ class ZohoService:
         self._last_fetch_time = None
         self._cache_duration = timedelta(minutes=15)
         
-        self._verify_token()
+        if verify_token:
+            self._verify_token()
+        
+        # Marcar como inicializado
+        self._initialized = True
 
     def _verify_token(self):
         try:
