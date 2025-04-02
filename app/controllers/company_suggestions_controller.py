@@ -1,6 +1,7 @@
 from src.utils.chatgpt_helper import ChatGPTHelper
 from src.services.external.zoho_services import ZohoService
 import logging
+import re
 # Importar funciones de gestión de idioma global
 from app.constants.language import (
     get_last_detected_language, 
@@ -22,6 +23,17 @@ class CompanySuggestionsController:
         :param data: Datos de la solicitud
         :return: Resultado de validación
         """
+        # Verificar si es una respuesta simple como "no"
+        if isinstance(data, str) and data.strip().lower() == "no":
+            return {
+                'is_valid': True,
+                'is_no_companies': True,
+                'sector': None,
+                'region': None,
+                'specific_area': None,
+                'preselected_companies': []
+            }
+            
         if not data:
             return {
                 'is_valid': False,
@@ -31,20 +43,114 @@ class CompanySuggestionsController:
         sector = data.get('sector')
         region = data.get('processed_region') or data.get('region')
         
+        # Manejar caso en que region sea un diccionario
+        if isinstance(region, dict):
+            # Intentar obtener el valor de región como texto
+            region_text = region.get('name') or region.get('region') or region.get('original_location')
+            # Si no podemos extraer un valor de texto, convertir a string
+            if not region_text:
+                self.logger.warning(f"Region is a dictionary without expected keys: {region}")
+                region_text = str(region)
+            region = region_text
+        
         if not sector or not region:
             return {
                 'is_valid': False,
                 'error': 'Sector and region are required'
             }
         
+        # Verificar si hay texto sin sentido en la entrada
+        if self._contains_nonsense_text(sector, region, data.get('specific_area', '')):
+            return {
+                'is_valid': False,
+                'error': 'nonsense_input',
+                'sector': sector,
+                'region': region,
+                'specific_area': data.get('specific_area'),
+                'detected_language': data.get('detected_language')
+            }
+        
         return {
             'is_valid': True,
+            'is_no_companies': False,
             'sector': sector,
             'region': region,
             'specific_area': data.get('specific_area'),
             'preselected_companies': data.get('preselected_companies', []),
             'detected_language': data.get('detected_language')
         }
+        
+    def _is_nonsense_text(self, text):
+        """
+        Detecta si el texto parece no tener sentido
+        
+        :param text: Texto a evaluar
+        :return: True si parece ser texto sin sentido, False en caso contrario
+        """
+        if not text:
+            return False
+            
+        # Asegurar que text sea una cadena
+        if not isinstance(text, str):
+            try:
+                text = str(text)
+            except:
+                return True  # Si no se puede convertir a string, considerarlo como sin sentido
+            
+        # Quitar espacios extras
+        text = text.strip().lower()
+        
+        # Texto muy corto (menor a 3 caracteres)
+        if len(text) < 3:
+            return True
+            
+        # Solo números
+        if re.match(r'^[0-9]+$', text):
+            return True
+            
+        # Palabras cortas sin contexto como "dogs", "cat", etc.
+        if re.match(r'^[a-z]+$', text.lower()) and len(text) < 5:
+            return True
+            
+        # Verificar patrones comunes de teclado
+        keyboard_patterns = ['asdf', 'qwer', 'zxcv', '1234', 'hjkl', 'uiop']
+        for pattern in keyboard_patterns:
+            if pattern in text.lower():
+                return True
+            
+        # Texto aleatorio (una sola palabra larga sin espacios)
+        if len(text.split()) == 1 and len(text) > 8:
+            # Verificar si tiene una distribución de caracteres poco natural
+            # Caracteres raros o poco comunes en muchos idiomas
+            rare_chars = len(re.findall(r'[qwxzjkvfy]', text.lower()))
+            if rare_chars / len(text) > 0.3:  # Alta proporción de caracteres poco comunes
+                return True
+            
+            # Patrones repetitivos
+            if any(text.count(c) > len(text) * 0.4 for c in text):  # Un carácter repetido muchas veces
+                return True
+                
+        return False
+        
+    def _contains_nonsense_text(self, sector, region, specific_area):
+        """
+        Verifica si alguno de los campos contiene texto sin sentido
+        
+        :param sector: Sector
+        :param region: Región
+        :param specific_area: Área específica
+        :return: True si algún campo contiene texto sin sentido
+        """
+        if self._is_nonsense_text(sector):
+            return True
+            
+        if self._is_nonsense_text(region):
+            return True
+            
+        if specific_area and self._is_nonsense_text(specific_area):
+            return True
+            
+        return False
 
     def get_company_suggestions(self, data):
         """
@@ -54,9 +160,54 @@ class CompanySuggestionsController:
         :return: Respuesta procesada
         """
         try:
+            # Verificar si es una respuesta "no" directa
+            if isinstance(data, str) and data.strip().lower() == "no":
+                self.logger.info("User responded 'no' to company suggestions prompt")
+                # Usar datos de la sesión anterior (necesita implementarse en un nivel superior)
+                # Por ahora, devolvemos mensaje de error informativo
+                return {
+                    'success': False,
+                    'error': 'Session data required for processing "no" response',
+                    'language': get_last_detected_language() or 'en-US',
+                    'status_code': 400
+                }
+
             # Validar entrada
             validation_result = self.validate_input(data)
+            
+            # Si el usuario respondió "no" (validado a nivel de objeto)
+            if validation_result.get('is_valid') and validation_result.get('is_no_companies', False):
+                self.logger.info("User responded 'no' to company suggestions - need previous session data")
+                # Aquí deberías recuperar sector y region de la sesión anterior
+                # Esta lógica debe implementarse según la estructura de sesiones de la app
+                
+                # Por ahora, mensaje informativo de error
+                return {
+                    'success': False,
+                    'error': 'Session data required when no companies specified',
+                    'language': get_last_detected_language() or 'en-US',
+                    'status_code': 400
+                }
+                
             if not validation_result['is_valid']:
+                # Verificar si es por texto sin sentido
+                if validation_result.get('error') == 'nonsense_input':
+                    # Primero detectamos el idioma para el mensaje de error
+                    language = self._get_language_for_error_message(validation_result)
+                    
+                    # Mensaje guía para el usuario, simplificado y directo
+                    guidance_message = self.chatgpt.translate_message(
+                        "Please enter a valid response. Type 'yes' to proceed or 'no' to generate a new list.",
+                        language
+                    )
+                    
+                    return {
+                        'success': False,
+                        'message': guidance_message,
+                        'language': language,
+                        'status_code': 400
+                    }
+                
                 return {
                     'success': False,
                     'error': validation_result['error'],
@@ -102,6 +253,25 @@ class CompanySuggestionsController:
                 'language': get_last_detected_language(),
                 'status_code': 500
             }
+            
+    def _get_language_for_error_message(self, validation_result):
+        """
+        Obtener el idioma para el mensaje de error
+        
+        :param validation_result: Resultado de validación
+        :return: Código de idioma
+        """
+        # Primero intentar usar el idioma detectado en los datos
+        if validation_result.get('detected_language'):
+            return validation_result['detected_language']
+            
+        # Si no, obtener el último idioma detectado
+        current_language = get_last_detected_language()
+        if current_language:
+            return current_language
+            
+        # Si no hay idioma detectado, usar inglés por defecto
+        return 'en-US'
 
     def _detect_and_set_language(self, validation_result):
         """

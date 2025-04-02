@@ -1,6 +1,7 @@
 from src.utils.chatgpt_helper import ChatGPTHelper
 from src.services.external.zoho_services import ZohoService
 from app.services.excluded_companies_service import ExcludedCompaniesService
+import re
 # Importar funciones de gestión de idioma global
 from app.constants.language import (
     get_last_detected_language, 
@@ -25,7 +26,9 @@ class ClientPerspectiveController:
             'positive_response': "Great! We'll include client-side companies in the search.",
             'negative_response': "Understood. We'll proceed without client-side companies.",
             'unclear_response': "I'm sorry, could you please clearly answer yes or no about including client-side companies?",
-            'processing_error': "An error occurred while processing your request."
+            'processing_error': "An error occurred while processing your request.",
+            'company_list_prefix': "Here are the recommended client companies, with verified companies listed first. Do you agree with this list?",
+            'nonsense_input': "Please provide a valid response. Would you like to include client-side companies? Please answer with 'yes' or 'no'."
         }
 
     def validate_input(self, data):
@@ -44,10 +47,70 @@ class ClientPerspectiveController:
             }
         
         print(f"Received data: {data}")
+        
+        # Verificar si el campo 'answer' contiene texto sin sentido
+        if 'answer' in data and self._is_nonsense_text(data['answer']):
+            print("Nonsense text detected in answer")
+            return {
+                'is_valid': False,
+                'error': 'nonsense_input',
+                'data': data
+            }
+        
         return {
             'is_valid': True,
             'data': data
         }
+        
+    def _is_nonsense_text(self, text):
+        """
+        Detecta si el texto parece no tener sentido
+        
+        :param text: Texto a evaluar
+        :return: True si parece ser texto sin sentido, False en caso contrario
+        """
+        if not text:
+            return False
+            
+        # Quitar espacios extras
+        text = text.strip().lower()
+        
+        # Respuestas válidas específicas para este controlador
+        valid_answers = ['yes', 'y', 'yeah', 'yep', 'si', 'sí', 'no', 'n', 'nope', 'no,', 'noo', 'yes,', 'yess']
+        if text in valid_answers:
+            return False
+            
+        # Texto muy corto (menor a 3 caracteres)
+        if len(text) < 3 and text not in valid_answers:
+            return True
+            
+        # Solo números
+        if re.match(r'^[0-9]+$', text):
+            return True
+            
+        # Palabras cortas sin contexto como "dogs", "cat", etc.
+        if re.match(r'^[a-z]+$', text.lower()) and len(text) < 5 and text not in valid_answers:
+            return True
+            
+        # Verificar patrones comunes de teclado
+        keyboard_patterns = ['asdf', 'qwer', 'zxcv', '1234', 'hjkl', 'uiop']
+        for pattern in keyboard_patterns:
+            if pattern in text.lower():
+                return True
+            
+        # Texto aleatorio (una sola palabra larga sin espacios)
+        if len(text.split()) == 1 and len(text) > 8:
+            # Verificar si tiene una distribución de caracteres poco natural
+            # Caracteres raros o poco comunes en muchos idiomas
+            rare_chars = len(re.findall(r'[qwxzjkvfy]', text.lower()))
+            if rare_chars / len(text) > 0.3:  # Alta proporción de caracteres poco comunes
+                return True
+            
+            # Patrones repetitivos
+            if any(text.count(c) > len(text) * 0.4 for c in text):  # Un carácter repetido muchas veces
+                return True
+                
+        return False
 
     def process_client_perspective(self, data):
         """
@@ -58,7 +121,6 @@ class ClientPerspectiveController:
         """
         try:
             print("\n=== Processing Client Perspective ===")
-            print(f"Input data: {data}")
             
             # Importante: Verificar si hay un idioma explícito en los datos
             if data and isinstance(data, dict):
@@ -81,7 +143,25 @@ class ClientPerspectiveController:
             # Validar entrada
             validation_result = self.validate_input(data)
             if not validation_result['is_valid']:
-                print(f"Input validation failed: {validation_result['error']}")
+                # Verificar si es por texto sin sentido
+                if validation_result.get('error') == 'nonsense_input':
+                    # Procesar idioma para el mensaje de error
+                    detected_language = self._process_language(validation_result['data'])
+                    
+                    # Mensaje guía para el usuario, que reestablece la pregunta original
+                    guidance_message = self.chatgpt.translate_message(
+                        self.BASE_MESSAGES['nonsense_input'], 
+                        detected_language
+                    )
+                    
+                    return {
+                        'success': False,
+                        'message': guidance_message,
+                        'detected_language': detected_language,
+                        'stage': 'clarification',
+                        'status_code': 400
+                    }
+                
                 return {
                     'success': False,
                     'error': validation_result['error'],
@@ -115,8 +195,6 @@ class ClientPerspectiveController:
         except Exception as e:
             print(f"\n=== Error in process_client_perspective ===")
             print(f"Error details: {str(e)}")
-            import traceback
-            print(f"Traceback: {traceback.format_exc()}")
             
             # Usar el mensaje base y traducirlo si es necesario
             current_language = get_last_detected_language()
@@ -192,8 +270,6 @@ class ClientPerspectiveController:
         
         except Exception as e:
             print(f"Error in language detection: {e}")
-            import traceback
-            print(f"Traceback: {traceback.format_exc()}")
             return current_language
 
     def _request_initial_perspective(self, detected_language, data):
@@ -249,9 +325,7 @@ class ClientPerspectiveController:
             return self._handle_positive_response(data, detected_language)
         
         # Para respuestas más complejas, usar el chatgpt para extraer la intención
-        print("Analyzing complex response with ChatGPT...")
         intention_result = self.chatgpt.extract_intention(answer)
-        print(f"Intention result: {intention_result}")
         intention = intention_result.get('intention') if intention_result.get('success') else None
         
         print(f"Extracted intention: {intention}")
@@ -266,113 +340,83 @@ class ClientPerspectiveController:
 
     def _handle_positive_response(self, data, detected_language):
         """
-        Manejar respuesta positiva en el idioma detectado
+        Manejar respuesta positiva en el idioma detectado y obtener empresas cliente
         
         :param data: Datos de la solicitud
         :param detected_language: Idioma detectado
-        :return: Respuesta procesada con lista de empresas sugeridas
+        :return: Respuesta con empresas cliente
         """
         print("\n=== Positive Response Handling ===")
+        print(f"Sector: {data.get('sector', 'Financial Services')}")
+        print(f"Region: {data.get('region', 'Europe')}")
         
-        # Obtener empresas del lado del cliente
-        sector = data.get('sector', 'Financial Services')
-        region = data.get('region', 'Europe')
-        
-        print(f"DEBUG: Sector: {sector}")
-        print(f"DEBUG: Region: {region}")
-        
-        # Obtener las empresas excluidas, si hay alguna
         try:
-            excluded_companies = self.excluded_companies_service.get_excluded_companies()
-            print(f"Found {len(excluded_companies)} excluded companies")
-            if excluded_companies:
-                print(f"First 5 excluded companies: {excluded_companies[:5]}")
-        except Exception as e:
-            print(f"Error getting excluded companies: {e}")
-            import traceback
-            print(f"Traceback: {traceback.format_exc()}")
+            # Obtener empresas excluidas si están disponibles
             excluded_companies = []
+            try:
+                excluded_companies = self.excluded_companies_service.get_excluded_companies()
+                print(f"Found {len(excluded_companies)} excluded companies")
+            except Exception as e:
+                print(f"Error getting excluded companies: {e}")
         
-        # Llamar al servicio ChatGPT para obtener empresas del lado del cliente
-        print(f"Getting client-side companies for sector: {sector}, region: {region}")
-        
-        try:
-            print("\n=== DEBUG: Antes de llamar a get_client_side_companies ===")
+            # AQUÍ ESTÁ LA CORRECCIÓN: Usar get_client_side_companies en lugar de get_client_companies
             client_companies_result = self.chatgpt.get_client_side_companies(
-                sector=sector,
-                geography=region,
+                sector=data.get('sector', 'Financial Services'),
+                geography=data.get('region', 'Europe'),
                 excluded_companies=excluded_companies
             )
-            print("\n=== DEBUG: Después de llamar a get_client_side_companies ===")
-            print(f"Result type: {type(client_companies_result)}")
-            print(f"Result keys: {client_companies_result.keys() if isinstance(client_companies_result, dict) else 'Not a dict'}")
-            print(f"Success: {client_companies_result.get('success')}")
-            print(f"Content type: {type(client_companies_result.get('content', []))}")
-            print(f"Content length: {len(client_companies_result.get('content', []))}")
-            if 'content' in client_companies_result and client_companies_result['content']:
-                print(f"First 5 companies: {client_companies_result['content'][:5]}")
-            else:
-                print("No companies in content or content is missing")
-                print(f"Full result: {client_companies_result}")
-        except Exception as e:
-            print(f"ERROR calling get_client_side_companies: {str(e)}")
-            import traceback
-            print(f"Traceback: {traceback.format_exc()}")
-            # Crear una estructura de resultado vacía pero válida para continuar
-            client_companies_result = {'success': False, 'error': str(e), 'content': []}
-        
-        # Verificar si la obtención de empresas fue exitosa
-        if not client_companies_result.get('success', False):
-            error_message = self.chatgpt.translate_message(
-                "Error generating client-side companies", 
+            
+            print(f"Client Companies Result Success: {client_companies_result.get('success', False)}")
+            print(f"Number of companies found: {len(client_companies_result.get('content', []))}")
+            
+            if not client_companies_result.get('success', False):
+                error_message = "Error generating client companies"
+                translated_error = self.chatgpt.translate_message(error_message, detected_language)
+                
+                return {
+                    'success': False,
+                    'message': translated_error,
+                    'detected_language': detected_language,
+                    'status_code': 400
+                }
+
+            # Traducir mensajes al idioma detectado
+            inclusion_message = self.chatgpt.translate_message(
+                self.BASE_MESSAGES['positive_response'], 
                 detected_language
             )
-            print(f"Error getting client companies: {error_message}")
-            print(f"Error details from result: {client_companies_result.get('error', 'No error details')}")
+            
+            prefix_message = self.chatgpt.translate_message(
+                self.BASE_MESSAGES['company_list_prefix'], 
+                detected_language
+            )
+            
+            # Estructura similar a la del SupplyChainExperienceController
+            return {
+                'success': True,
+                'message': inclusion_message,
+                'message_prefix': prefix_message,
+                'detected_language': detected_language,
+                'sector': data.get('sector'),
+                'region': data.get('region'),
+                'suggested_companies': client_companies_result.get('content', []),
+                'include_client_companies': True,
+                'stage': 'response',
+                'status_code': 200
+            }
+        except Exception as e:
+            print(f"Error in _handle_positive_response: {str(e)}")
+            error_message = self.chatgpt.translate_message(
+                self.BASE_MESSAGES['processing_error'],
+                detected_language
+            )
             return {
                 'success': False,
                 'message': error_message,
+                'error': str(e),
                 'detected_language': detected_language,
-                'status_code': 400
+                'status_code': 500
             }
-        
-        # Traducir mensajes de respuesta
-        print("\n=== Translating response messages ===")
-        response_message = self.chatgpt.translate_message(
-            "Perfect! I will include client-side companies in the search.", 
-            detected_language
-        )
-        
-        message_prefix = self.chatgpt.translate_message(
-            "Here are the recommended companies, with verified companies listed first. Do you agree with this list?",
-            detected_language
-        )
-        
-        print(f"Response message: {response_message}")
-        print(f"Message prefix: {message_prefix}")
-        
-        companies_list = client_companies_result.get('content', [])
-        print(f"Found {len(companies_list)} suggested companies")
-        
-        # Preparar respuesta final
-        response = {
-            'success': True,
-            'message': response_message,
-            'message_prefix': message_prefix,
-            'detected_language': detected_language,
-            'include_client_companies': True,
-            'suggested_companies': companies_list,
-            'sector': data.get('sector'),
-            'region': data.get('region'),
-            'stage': 'response',
-            'status_code': 200
-        }
-        
-        print("\n=== Final response structure ===")
-        print(f"Response keys: {response.keys()}")
-        print(f"suggested_companies length: {len(response['suggested_companies'])}")
-        
-        return response
 
     def _handle_negative_response(self, detected_language, data):
         """
@@ -397,8 +441,10 @@ class ClientPerspectiveController:
             'message': response_message,
             'detected_language': detected_language,
             'include_client_companies': False,
+            'suggested_companies': [],
             'sector': data.get('sector'),
-            'region': data.get('region')
+            'region': data.get('region'),
+            'stage': 'response'
         }
 
     def _handle_unclear_response(self, detected_language):

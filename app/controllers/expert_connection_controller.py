@@ -48,7 +48,9 @@ class ExpertConnectionController:
                 return {
                     'success': False,
                     'error': validation_result['error'],
-                    'status_code': 400
+                    'status_code': 400,
+                    'type': 'bot',
+                    'isError': True
                 }
             
             # Extraer datos validados
@@ -65,23 +67,60 @@ class ExpertConnectionController:
             )
             detected_language = text_processing_result.get('detected_language', current_language)
 
-            # Si el texto es muy corto (menos de 6 caracteres), mantener el idioma anterior
-            if len(text) <= 6:
+            # Si el texto es muy corto (menos de 15 caracteres), mantener el idioma anterior
+            if len(text) <= 15:
                 detected_language = current_language
-
-            # Extracción de intención
-            intention_result = self.chatgpt.extract_intention(text)
-
-            if not intention_result['success']:
-                translated_error = self.chatgpt.translate_message(
-                    intention_result['error'], 
-                    detected_language
-                )
+            
+            # Actualizar idioma global
+            update_last_detected_language(detected_language)
+            
+            # Validación preliminar para detectar entrada no válida (solo números o símbolos)
+            input_validation = self._validate_text_input(text)
+            if not input_validation['is_valid']:
+                # Obtener opciones traducidas al idioma detectado
+                yes_option = self.chatgpt.translate_message("yes", detected_language)
+                no_option = self.chatgpt.translate_message("no", detected_language)
+                
+                # Mensaje de error traducido
+                error_base_message = "I couldn't understand your response. Would you like to connect with our experts? Please answer with yes or no."
+                translated_error = self.chatgpt.translate_message(error_base_message, detected_language)
+                
                 return {
                     'success': False,
-                    'error': translated_error,
-                    'step': 'clarify',
+                    'message': translated_error,
+                    'type': 'bot',
+                    'isError': True,
+                    'error_type': 'invalid_response_format',
+                    'detected_language': detected_language,
+                    'options': [yes_option, no_option],
+                    'step': 'ask_expert_connection',
+                    'next_action': 'provide_expert_answer',
                     'status_code': 400
+                }
+
+            # Extracción de intención usando la función existente
+            intention_result = self.chatgpt.extract_intention(text)
+
+            # Modificación aquí: Si la intención no es clara, proporcionar un mensaje claro pidiendo sí o no
+            if not intention_result['success'] or intention_result.get('intention') == 'unclear':
+                # Obtener opciones traducidas al idioma detectado
+                yes_option = self.chatgpt.translate_message("yes", detected_language)
+                no_option = self.chatgpt.translate_message("no", detected_language)
+                
+                # Mensaje claro solicitando una respuesta de sí o no
+                clarification_message = "Would you like to connect with our experts? Please answer with yes or no."
+                translated_message = self.chatgpt.translate_message(clarification_message, detected_language)
+                
+                return {
+                    'success': True,  # Cambiado a True para que no sea un error
+                    'message': translated_message,
+                    'type': 'bot',
+                    'isError': False,  # Cambiado a False
+                    'detected_language': detected_language,
+                    'options': [yes_option, no_option],
+                    'step': 'ask_expert_connection',
+                    'next_action': 'provide_expert_answer',
+                    'status_code': 200  # Cambiado a 200 para indicar éxito
                 }
 
             intention = intention_result['intention']
@@ -91,6 +130,8 @@ class ExpertConnectionController:
             
             # Añadir código de estado a la respuesta
             response['status_code'] = 200 if response.get('success', False) else 400
+            response['type'] = 'bot'
+            response['isError'] = False
             
             return response
 
@@ -98,7 +139,7 @@ class ExpertConnectionController:
             # Obtener el último idioma detectado para traducir el error
             current_language = get_last_detected_language()
             
-            error_message = "An error occurred while processing your request."
+            error_message = f"An error occurred while processing your request: {str(e)}"
             try:
                 error_message = self.chatgpt.translate_message(
                     error_message, 
@@ -110,8 +151,33 @@ class ExpertConnectionController:
             return {
                 'success': False,
                 'error': error_message,
-                'status_code': 500
+                'status_code': 500,
+                'type': 'bot',
+                'isError': True
             }
+    
+    def _validate_text_input(self, text):
+        """
+        Validar si el texto contiene alguna palabra válida y no solo números o símbolos
+        
+        :param text: Texto a validar
+        :return: Diccionario de resultado
+        """
+        # Eliminar espacios en blanco
+        text = text.strip()
+        
+        # Si el texto está vacío, no es válido
+        if not text:
+            return {'is_valid': False, 'reason': 'empty_text'}
+        
+        # Verificar si el texto contiene al menos una letra
+        has_letter = any(char.isalpha() for char in text)
+        
+        if not has_letter:
+            return {'is_valid': False, 'reason': 'no_letters'}
+        
+        # Si tiene letras, considerar como entrada potencialmente válida para procesar
+        return {'is_valid': True}
 
     def _generate_response(self, intention, name, detected_language):
         """
@@ -152,11 +218,16 @@ class ExpertConnectionController:
             base_message = "I'm not sure if that's a yes or no. Could you please clarify?"
             translated_message = self.chatgpt.translate_message(base_message, detected_language)
             
+            yes_option = self.chatgpt.translate_message("yes", detected_language)
+            no_option = self.chatgpt.translate_message("no", detected_language)
+            
             return {
                 'success': True,
                 'message': translated_message,
                 'detected_language': detected_language,
-                'step': 'clarify'
+                'step': 'clarify',
+                'options': [yes_option, no_option],
+                'next_action': 'provide_expert_answer'
             }
 
     def reset_last_detected_language(self, language='en-US'):

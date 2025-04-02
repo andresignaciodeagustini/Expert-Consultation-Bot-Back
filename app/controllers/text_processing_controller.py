@@ -10,8 +10,9 @@ class TextProcessingController:
         
         self.BASE_MESSAGES = {
             'region_received': "Thank you for specifying the region.",
-            'ask_companies': "Are there specific companies where you would like experts to have experience?",
-            'processing_error': "Error processing your request"
+            'ask_companies': "Are there specific companies where you would like experts to have experience? Please enter the names of companies (for example: 'Google, Microsoft, Amazon') or respond with 'no' if you don't have specific companies in mind.",
+            'processing_error': "Error processing your request",
+            'invalid_region': "We couldn't identify a valid geographic region from your input. Please provide a specific city, country, or region (for example: 'New York', 'Spain', 'Southeast Asia'). This helps us find experts with relevant experience in your area of interest."
         }
 
     def validate_input(self, data):
@@ -102,10 +103,17 @@ class TextProcessingController:
             
             # Verificar si se pudo extraer la región
             if not region or not region.get('success', False):
-                self.logger.warning("Region extraction failed")
+                self.logger.warning(f"Region extraction failed for input: '{input_text}'")
+                
+                # Traducir mensaje explicativo para entrada no válida
+                explanatory_message = self.chatgpt.translate_message(
+                    self.BASE_MESSAGES['invalid_region'], 
+                    detected_language
+                )
+                
                 return {
                     'success': False,
-                    'error': 'Could not identify a valid region from the provided text',
+                    'error': explanatory_message,
                     'status_code': 400,
                     'detected_language': detected_language
                 }

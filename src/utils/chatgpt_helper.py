@@ -1,6 +1,7 @@
 from openai import OpenAI
 import logging
 import uuid
+import json
 import re
 from typing import Dict, List, Any, Set, BinaryIO
 import os
@@ -413,66 +414,348 @@ class ChatGPTHelper:
 
 
 
-
-
-
-
-
-    def translate_sector(self, sector_input:str) -> Dict:
+    def translate_sector(self, sector_input: str) -> dict:
+        """
+        Valida y traduce el sector proporcionado.
+        Identifica si el texto del usuario representa un sector económico válido.
+        
+        :param sector_input: Texto proporcionado por el usuario
+        :return: Diccionario con resultado de la validación y traducción
+        """
         try:
+            # Obtener el idioma actual para las traducciones
+            self.current_language = get_last_detected_language()
+            
+            # Lista de sectores disponibles (ampliada)
+            available_sectors = [
+                "Technology", "Financial Services", "Manufacturing", 
+                "Healthcare", "Retail", "Energy", "Education", 
+                "Real Estate", "Transportation", "Media", "Agriculture"
+            ]
+            
+            # Primero, verificar si hay una coincidencia exacta con la lista de sectores
+            sector_input_cleaned = sector_input.strip()
+            
+            # Verificación directa de coincidencia exacta (case sensitive)
+            if sector_input_cleaned in available_sectors:
+                # Si hay coincidencia exacta, devolver inmediatamente como válido
+                english_sector = sector_input_cleaned
+                displayed_sector = self.translate_message(english_sector, self.current_language)
+                
+                return {
+                    "is_valid": True,
+                    "translated_sector": english_sector,  # Versión en inglés para uso interno
+                    "displayed_sector": displayed_sector,  # Versión traducida para mostrar al usuario
+                    "confidence": 1.0  # Confianza total para coincidencias exactas
+                }
+            
+            # Verificación ignorando mayúsculas/minúsculas
+            for sector in available_sectors:
+                if sector_input_cleaned.lower() == sector.lower():
+                    # Si hay coincidencia ignorando mayúsculas/minúsculas, usar el formato correcto
+                    english_sector = sector  # Usar el formato con mayúsculas correcto de la lista
+                    displayed_sector = self.translate_message(english_sector, self.current_language)
+                    
+                    return {
+                        "is_valid": True,
+                        "translated_sector": english_sector,
+                        "displayed_sector": displayed_sector,
+                        "confidence": 1.0
+                    }
+            
+            # Si no hay coincidencia exacta, continuar con el enfoque basado en ChatGPT
             messages = [
                 {
-                    "role":"system",
-                    "content": """ You are a multilingual translator spececialized in business sector.
-                    Your task is to identify if the input refers to any of these sectors:
-                    -Technology(including tech, te, tecnologia, technologie,etc.)
-                    -Financial Services (including finance, servicion financierons, servizi fiannziari, etc.)
-                    -Manufacturing (including finance, servicios financieros, servici finanziari, etc.)
-
-                    If the input matches any sector in ANY language, returnt the English version.
-                    If it doesn't match, return 'invalid'.
-                    Only return the exact English version or 'invalid', nothing else."""
+                    "role": "system",
+                    "content": """You are a multilingual translator specialized in business sectors.
+                    
+                    Your task is to:
+                    1. Determine if the input text refers to a valid business/economic sector.
+                    2. Match the input to one of these standard sectors:
+                    - Technology (including IT, Software, Hardware, Tech, etc.)
+                    - Financial Services (including Finance, Banking, Insurance, etc.)
+                    - Manufacturing (including Production, Industrial, Factory, etc.)
+                    - Healthcare (including Medical, Pharma, Health, etc.)
+                    - Retail (including Commerce, Shopping, etc.)
+                    - Energy (including Oil, Gas, Electricity, etc.)
+                    - Education (including Academic, Schools, etc.)
+                    - Real Estate (including Property, Construction, etc.)
+                    - Transportation (including Logistics, Shipping, etc.)
+                    - Media (including Entertainment, Publishing, etc.)
+                    - Agriculture (including Farming, Food Production, etc.)
+                    
+                    3. If the input text is clearly about wanting something else (like "I want pizza" or "Help me") or contains nonsensical content, identify it as "non_sector".
+                    
+                    4. If the input contains a sector name in ANY language, return the standardized English version from the list above.
+                    
+                    Format your answer as JSON with two fields:
+                    - "sector_match": the standardized English sector name, or "non_sector" if input isn't a sector
+                    - "confidence": a value from 0.0 to 1.0 indicating your confidence in the match
+                    
+                    Ensure the output is ONLY valid JSON with no extra text.
+                    """
                 },
                 {
-                    "role":"user",
-                    "content":f"Transalate this sector:  {sector_input}"
+                    "role": "user",
+                    "content": f"Analyze this text to determine if it refers to a business sector: '{sector_input}'"
                 }
             ]
-
+            
+            # Llamar a la API de OpenAI sin el parámetro response_format
             response = self.client.chat.completions.create(
                 model="gpt-4",
                 messages=messages,
                 temperature=0.3
             )
-
-            english_sector = response.choices[0].message.content.strip()
-
-            if english_sector == 'invalid':
-                error_sectors = "Technology, Financial Services, Manufacturing"
-                translated_sectors = self.translate_message(error_sectors, self.current_language)
-
-                return { 
-                    "success": True,
-                    "translated_sector": None,
+            
+            # Extraer el texto de la respuesta
+            response_text = response.choices[0].message.content.strip()
+            
+            # Intentar parsear la respuesta como JSON
+            try:
+                # Usar json.loads para parsear la respuesta
+                result = json.loads(response_text)
+            except json.JSONDecodeError:
+                # Si hay un error al parsear JSON, intentar extraer información manualmente
+                logger.warning(f"Failed to parse JSON response: {response_text}")
+                
+                # Enfoque de respaldo: Buscar un sector conocido en la respuesta
+                matched_sector = None
+                for sector in available_sectors:
+                    if sector.lower() in response_text.lower():
+                        matched_sector = sector
+                        break
+                
+                if matched_sector:
+                    result = {
+                        "sector_match": matched_sector,
+                        "confidence": 0.7
+                    }
+                else:
+                    result = {
+                        "sector_match": "non_sector",
+                        "confidence": 0.5
+                    }
+            
+            # Convertir lista de sectores a texto para mensaje de error
+            available_sectors_text = ", ".join(available_sectors)
+            
+            # Caso 1: No es un sector válido
+            if result.get("sector_match") == "non_sector" or result.get("confidence", 0) < 0.7:
+                # Traducir lista de sectores disponibles al idioma del usuario
+                translated_sectors = self.translate_message(available_sectors_text, self.current_language)
+                
+                return {
                     "is_valid": False,
-                    "available_sectors": translated_sectors
+                    "available_sectors": translated_sectors,
+                    "translated_sector": None,
+                    "displayed_sector": None,
+                    "reason": "not_a_sector" if result.get("sector_match") == "non_sector" else "low_confidence"
                 }
             
-            displayed_sector = self.translate_message(english_sector, self.current_language)
-
-            return {
-                "success": True,
-                "translated_sector":english_sector,
-                "displayed_sector": displayed_sector,
-                "is_valid": True
-            }
+            # Caso 2: Es un sector válido según GPT-4
+            else:
+                # Obtener el sector estandarizado en inglés
+                english_sector = result.get("sector_match")
+                
+                # Traducir el sector al idioma del usuario para mostrarlo
+                displayed_sector = self.translate_message(english_sector, self.current_language)
+                
+                return {
+                    "is_valid": True,
+                    "translated_sector": english_sector,  # Versión en inglés para uso interno
+                    "displayed_sector": displayed_sector,  # Versión traducida para mostrar al usuario
+                    "confidence": result.get("confidence", 0.8)
+                }
         
         except Exception as e:
             logger.error(f"Error translating sector: {str(e)}")
             return {
-                "success":False,
-                "error": str(e)
+                "is_valid": False,
+                "error": str(e),
+                "available_sectors": "Technology, Financial Services, Manufacturing, Healthcare, Retail, etc."
             }
+
+
+
+
+    def validate_specific_area(self, specific_area: str, sector: str) -> dict:
+        """
+        Valida si el área específica proporcionada está relacionada con el sector.
+        
+        :param specific_area: Área específica proporcionada por el usuario
+        :param sector: Sector previamente validado
+        :return: Diccionario con resultado de la validación
+        """
+        try:
+            # Obtener el idioma actual para las traducciones
+            self.current_language = get_last_detected_language()
+            
+            # Lista de ejemplos de áreas específicas por sector para el mensaje de error
+            sector_specific_areas = {
+                "Technology": "Software Development, Cybersecurity, Cloud Computing, AI",
+                "Financial Services": "Banking, Insurance, Investment, Wealth Management",
+                "Manufacturing": "Automotive, Electronics, Textiles, Food Processing",
+                "Healthcare": "Pharmaceuticals, Medical Devices, Healthcare IT, Biotechnology",
+                "Retail": "E-commerce, Fashion, Grocery, Consumer Electronics",
+                "Energy": "Renewable Energy, Oil & Gas, Utilities, Energy Storage",
+                "Education": "K-12, Higher Education, EdTech, Professional Training",
+                "Real Estate": "Commercial, Residential, Property Management, Development",
+                "Transportation": "Logistics, Aviation, Maritime, Railways",
+                "Media": "Digital Media, Publishing, Broadcasting, Social Media",
+                "Agriculture": "Crop Production, Livestock, AgTech, Food Processing"
+            }
+            
+            # Si el área específica es "no" o está vacía, considerar como válida
+            if not specific_area or specific_area.lower() == "no":
+                return {
+                    "is_valid": True,
+                    "specific_area": "general",
+                    "displayed_area": "general"
+                }
+            
+            # Verificación simple de palabras clave para áreas tecnológicas comunes
+            if sector == "Technology":
+                tech_areas = ["software", "hardware", "cloud", "ai", "artificial intelligence", 
+                            "data", "cybersecurity", "network", "web", "mobile", "app", 
+                            "development", "programming", "computer", "it", "tech", "saas", 
+                            "platform", "digital", "internet", "computing"]
+                
+                # Comprobar si alguna palabra clave está en el área específica
+                if any(keyword in specific_area.lower() for keyword in tech_areas):
+                    return {
+                        "is_valid": True,
+                        "specific_area": specific_area,
+                        "displayed_area": specific_area
+                    }
+            
+            # Verificación simple para áreas financieras comunes
+            if sector == "Financial Services":
+                finance_areas = ["bank", "insurance", "invest", "wealth", "asset", "capital", 
+                            "money", "financial", "trading", "broker", "credit", "loan", 
+                            "mortgage", "payment", "finance", "accounting", "tax", "fund", 
+                            "equity", "stock", "bond"]
+                
+                if any(keyword in specific_area.lower() for keyword in finance_areas):
+                    return {
+                        "is_valid": True,
+                        "specific_area": specific_area,
+                        "displayed_area": specific_area
+                    }
+            
+            # Para otros sectores o casos más complejos, usar ChatGPT con manejo de errores mejorado
+            try:
+                # Crear prompt para ChatGPT
+                messages = [
+                    {
+                        "role": "system",
+                        "content": f"""You are a business industry expert.
+                        
+                        Your task is to determine if the input text refers to a specific area or specialty within the {sector} sector.
+                        
+                        Examples of specific areas in {sector}:
+                        {sector_specific_areas.get(sector, "various specialized fields")}
+                        
+                        If the input is a valid specific area within {sector}, respond with: VALID: followed by a standardized name
+                        If the input is NOT a valid specific area, respond with: INVALID: followed by a brief reason
+                        """
+                    },
+                    {
+                        "role": "user",
+                        "content": f"Analyze if this text represents a specific area within {sector}: '{specific_area}'"
+                    }
+                ]
+                
+                # Llamar a la API de OpenAI sin response_format para compatibilidad
+                response = self.client.chat.completions.create(
+                    model="gpt-4",  # O usar un modelo que sepamos que es compatible
+                    messages=messages,
+                    temperature=0.3
+                )
+                
+                # Extraer la respuesta como texto
+                result_text = response.choices[0].message.content.strip()
+                
+                # Procesar la respuesta basada en el formato solicitado
+                if result_text.startswith("VALID:"):
+                    standardized_area = result_text[6:].strip()
+                    
+                    # Traducir al idioma del usuario para mostrar
+                    displayed_area = self.translate_message(standardized_area, self.current_language)
+                    
+                    return {
+                        "is_valid": True,
+                        "specific_area": standardized_area,
+                        "displayed_area": displayed_area,
+                        "confidence": 0.9
+                    }
+                else:  # Comienza con "INVALID:" o formato inesperado
+                    # Obtener ejemplos de áreas para este sector
+                    examples = sector_specific_areas.get(sector, "specialized areas")
+                    
+                    # Traducir mensaje de error con ejemplos
+                    error_message = f"Please provide a valid area within {sector} like: {examples}, etc."
+                    translated_error = self.translate_message(error_message, self.current_language)
+                    
+                    return {
+                        "is_valid": False,
+                        "message": translated_error,
+                        "reason": result_text[8:].strip() if result_text.startswith("INVALID:") else "Not related to the sector",
+                        "examples": examples
+                    }
+                    
+            except Exception as api_error:
+                # Si hay un error con la API, usar un enfoque de respaldo basado en palabras clave
+                logger.warning(f"API error in specific area validation: {str(api_error)}")
+                
+                # Enfoque de respaldo: considerar válido si hay palabras relacionadas al sector
+                # Este es un enfoque simplificado, idealmente se expandiría
+                sector_keywords = {
+                    "Technology": ["tech", "software", "hardware", "digital", "computer", "network", "data", "cloud", "cyber"],
+                    "Financial Services": ["finance", "bank", "invest", "money", "capital", "fund", "asset", "loan", "credit"],
+                    "Healthcare": ["health", "medical", "patient", "care", "clinical", "hospital", "pharma", "therapy"],
+                    # Añadir más sectores según sea necesario
+                }
+                
+                keywords = sector_keywords.get(sector, [sector.lower()])
+                
+                if any(keyword in specific_area.lower() for keyword in keywords):
+                    return {
+                        "is_valid": True,
+                        "specific_area": specific_area,
+                        "displayed_area": specific_area,
+                        "confidence": 0.7,
+                        "note": "Validated using fallback method"
+                    }
+                
+                # Si la validación de respaldo también falla, devolver no válido
+                examples = sector_specific_areas.get(sector, "specialized areas")
+                error_message = f"Please provide a valid area within {sector} like: {examples}, etc."
+                translated_error = self.translate_message(error_message, self.current_language)
+                
+                return {
+                    "is_valid": False,
+                    "message": translated_error,
+                    "reason": "Not recognized as related to the sector",
+                    "examples": examples
+                }
+        
+        except Exception as e:
+            logger.error(f"Error validating specific area: {str(e)}")
+            # En caso de error, aceptar el área como válida para no bloquear al usuario
+            return {
+                "is_valid": True,
+                "specific_area": specific_area,
+                "displayed_area": specific_area,
+                "confidence": 0.5,
+                "note": "Accepted despite validation error"
+            }
+            
+
+
+
+
+
 
     def get_bot_response(self, response_key: str, *args) -> str:
         english_message = BOT_MESSAGES[response_key].format(*args) if args else BOT_MESSAGES[response_key]
@@ -1287,7 +1570,21 @@ class ChatGPTHelper:
                 "intention": None
             }
 
-
+    def is_negative_response(self, text: str) -> bool:
+        """
+        Determina si el texto representa una respuesta negativa.
+        
+        :param text: Texto a analizar
+        :return: True si es una respuesta negativa, False en caso contrario
+        """
+        result = self.extract_intention(text)
+        
+        # Si la extracción fue exitosa y la intención es "no"
+        if result.get("success", False) and result.get("intention") == "no":
+            return True
+        
+        # En cualquier otro caso, no se considera una respuesta negativa
+        return False
 
 
 
@@ -1356,52 +1653,89 @@ class ChatGPTHelper:
                 return "Unknown"
             
 
-
-
     def extract_region(self, location: str) -> Dict:
-            try:
-                logger.info(f"Identifying region for location: {location}")
-
-                messages = [
-                    {
-                        "role": "system",
-                        "content": "You are a geography expert. You must categorize locations into one of these regions: North America, Europe, or Asia. Only respond with one of these three options."
-                    },
-                    {
-                        "role": "user",
-                        "content": f"Which region (North America, Europe, or Asia) does {location} belong to? Only respond with the region name."
-                    }
-                ]
-
-                response = self.client.chat.completions.create(
-                    model="gpt-4",
-                    messages=messages,
-                    temperature=0.3
-                )
-
-                region = response.choices[0].message.content.strip()
-
-                if region not in ["North America", "Europe", "Asia"]:
-                    logger.warning(f"Invalid region response: {region}")
-                    return {
-                        "success": False,
-                        "error": f"Invalid region: {region}"
-                    }
-
-                logger.info(f"Location '{location}' identified as {region}")
-                return {
-                    "success": True,
-                    "region": region,
-                    "original_location": location
-                }
-
-            except Exception as e:
-                logger.error(f"Error identifying region: {str(e)}")
+        try:
+            # Si el texto es muy corto o no parece una ubicación, rechazarlo de inmediato
+            if len(location.strip()) < 3 or any(char.isdigit() for char in location):
+                logger.warning(f"Invalid location input: {location}")
                 return {
                     "success": False,
-                    "error": str(e)
+                    "error": "Please provide a valid geographical location."
                 }
+                
+            logger.info(f"Identifying region for location: {location}")
+            
+            # Primero verificar si la entrada parece una ubicación geográfica
+            validation_messages = [
+                {
+                    "role": "system",
+                    "content": "You are a geography expert. Determine if the input is a valid geographical location or region. Respond with 'YES' if it's a valid location, or 'NO' followed by a brief explanation if it's not."
+                },
+                {
+                    "role": "user",
+                    "content": f"Is '{location}' a geographical location or region? Answer only with YES or NO."
+                }
+            ]
+            
+            validation_response = self.client.chat.completions.create(
+                model="gpt-4",
+                messages=validation_messages,
+                temperature=0.3
+            )
+            
+            validation_result = validation_response.choices[0].message.content.strip()
+            
+            # Si no es una ubicación válida, retornar error
+            if validation_result.startswith("NO"):
+                logger.warning(f"Input is not a valid location: {location}")
+                return {
+                    "success": False,
+                    "error": "Please provide a valid geographical location."
+                }
+            
+            # Si parece válido, proceder con la categorización de región
+            messages = [
+                {
+                    "role": "system",
+                    "content": "You are a geography expert. You must categorize locations into one of these regions: North America, Europe, or Asia. Only respond with one of these three options. If the location doesn't clearly belong to any of these regions, respond with 'OTHER'."
+                },
+                {
+                    "role": "user",
+                    "content": f"Which region (North America, Europe, or Asia) does {location} belong to? Only respond with the region name or 'OTHER' if it doesn't fit."
+                }
+            ]
+            
+            response = self.client.chat.completions.create(
+                model="gpt-4",
+                messages=messages,
+                temperature=0.3
+            )
+            
+            region = response.choices[0].message.content.strip()
+            
+            if region not in ["North America", "Europe", "Asia"]:
+                logger.warning(f"Invalid region response: {region}")
+                return {
+                    "success": False,
+                    "error": "Please specify a location in North America, Europe, or Asia."
+                }
+            
+            logger.info(f"Location '{location}' identified as {region}")
+            return {
+                "success": True,
+                "region": region,
+                "original_location": location
+            }
+            
+        except Exception as e:
+            logger.error(f"Error identifying region: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
         
+
+
     def extract_work_timing(self, text: str) -> str:
         try:
             messages = [
@@ -1497,7 +1831,6 @@ class ChatGPTHelper:
         except Exception as e:
             return None
 
-
     def process_company_response(self, text: str):
         try:
             messages = [
@@ -1537,20 +1870,56 @@ class ChatGPTHelper:
 
             result = response.choices[0].message.content.strip()
             
-            # Si es una respuesta negativa, devolver "no"
-            if result.lower() == "no":
+            # Verificar directamente si la entrada original es "no" o alguna variante
+            if text.lower().strip() in ["no", "n", "nope", "no."]:
+                print(f"Detected direct 'no' response from input: '{text}'")
                 return "no"
             
+            # Si la respuesta procesada es "no"
+            if result.lower().strip() == "no":
+                print(f"GPT interpreted response as 'no': '{result}'")
+                return "no"
+            
+            # Si son palabras simples como "no" (pero GPT no lo interpretó exactamente como "no")
+            if len(result.strip().split()) == 1 and len(result.strip()) <= 3:
+                print(f"Short single word response, checking if negative: '{result}'")
+                # Intentar determinar si es una variante de "no"
+                negative_check_messages = [
+                    {"role": "system", "content": "Determine if this is a negative response (meaning 'no'). Respond with ONLY 'yes' or 'no'."},
+                    {"role": "user", "content": f"Is '{result}' a way of saying 'no'?"}
+                ]
+                
+                negative_check = self.client.chat.completions.create(
+                    model="gpt-4",
+                    messages=negative_check_messages,
+                    temperature=0.1,
+                    max_tokens=10
+                )
+                
+                negative_result = negative_check.choices[0].message.content.strip().lower()
+                if negative_result == "yes":
+                    print(f"Confirmed '{result}' is a negative response")
+                    return "no"
+            
             # Si son compañías, devolver un diccionario
+            # Pero primero verificar que no sea solamente "no" mal interpretado
             companies = [company.strip() for company in result.split(',')]
+            if len(companies) == 1 and companies[0].lower() in ["no", "n", "nope"]:
+                print(f"Single 'no'-like company detected, treating as a negative response: '{companies[0]}'")
+                return "no"
+                
+            print(f"Interpreted as company list: {companies}")
             return {
                 'interested_in_companies': True,
                 'companies': companies
             }
 
-        except Exception:
-            return "no"
-
+        except Exception as e:
+            print(f"Error in process_company_response: {e}")
+            # En caso de error, verificar la entrada original
+            if text.lower().strip() in ["no", "n", "nope", "no."]:
+                return "no"
+            return "no"  # Default fallback
 
     def get_companies_suggestions(
         self,

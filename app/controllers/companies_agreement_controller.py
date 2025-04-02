@@ -10,7 +10,8 @@ class CompaniesAgreementController:
             'negative_response': "I'll help you find different company suggestions.",
             'processing_error': "Error processing your request",
             'intention_error': 'Could not determine if you agree with the list. Please answer yes or no.',
-            'input_error': 'Text is required'
+            'input_error': 'Text is required',
+            'invalid_input': 'Your input seems invalid. Please respond with yes/no to indicate if you agree with the list of companies.'
         }
 
     def validate_input(self, data):
@@ -74,7 +75,7 @@ class CompaniesAgreementController:
             print(f"Raw Intention: {intention}")
             
             # Validar intención
-            if intention is None:
+            if intention is None or (isinstance(intention, dict) and intention.get('success') is False):
                 error_message = self.BASE_MESSAGES['intention_error']
                 translated_error = self.chatgpt.translate_message(error_message, detected_language)
                 return {
@@ -132,11 +133,49 @@ class CompaniesAgreementController:
         print(f"Input Intention: {intention}")
         
         # Manejar diferentes formatos de intención
+        is_positive = False
+        
+        # Verificar si intention es None
+        if intention is None:
+            # Traducir mensaje de error
+            error_message = self.BASE_MESSAGES['invalid_input']
+            translated_message = self.chatgpt.translate_message(error_message, detected_language)
+            
+            return {
+                'success': False,
+                'error': translated_message,
+                'detected_language': detected_language
+            }
+            
+        # Si intention es un diccionario
         if isinstance(intention, dict):
-            is_positive = intention.get('intention', '').lower() == 'yes'
+            # Verificar si hay un campo 'intention' y es distinto de None
+            if 'intention' in intention and intention['intention'] is not None:
+                is_positive = intention.get('intention', '').lower() == 'yes'
+            else:
+                # Si no hay 'intention' o es None, responder con error
+                error_message = self.BASE_MESSAGES['invalid_input']
+                translated_message = self.chatgpt.translate_message(error_message, detected_language)
+                
+                return {
+                    'success': False,
+                    'error': translated_message,
+                    'detected_language': detected_language
+                }
         else:
-            # Si intention no es un diccionario, intentar convertirlo
-            is_positive = str(intention).lower() == 'yes'
+            # Si intention no es un diccionario, intentar convertirlo a string
+            try:
+                is_positive = str(intention).lower() == 'yes'
+            except:
+                # Si falla la conversión, responder con error
+                error_message = self.BASE_MESSAGES['invalid_input']
+                translated_message = self.chatgpt.translate_message(error_message, detected_language)
+                
+                return {
+                    'success': False,
+                    'error': translated_message,
+                    'detected_language': detected_language
+                }
         
         # Log de depuración de la interpretación
         print(f"Interpreted as Positive: {is_positive}")

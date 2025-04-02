@@ -48,7 +48,8 @@ class EmailCaptureController:
                 self.logger.error(f"Input validation failed: {validation_result['error']}")
                 return {
                     'success': False,
-                    'error': validation_result['error']
+                    'error': validation_result['error'],
+                    'error_type': 'invalid_input'
                 }
             
             input_text = validation_result['text']
@@ -61,9 +62,19 @@ class EmailCaptureController:
             
             if not email_extraction_result['success']:
                 self.logger.warning("Email extraction failed")
+                
+                # Obtener el idioma actual para traducir el mensaje de error
+                current_language = get_last_detected_language()
+                
+                # Traducir mensaje de error sobre formato de email inválido
+                error_base_message = "Please provide a valid email address (e.g. example@domain.com)"
+                translated_error = self.chatgpt.translate_message(error_base_message, current_language)
+                
                 return {
                     'success': False,
-                    'error': 'No valid email found in text'
+                    'error': translated_error,
+                    'error_type': 'invalid_email_format',
+                    'detected_language': current_language
                 }
 
             email = email_extraction_result['email']

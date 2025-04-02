@@ -60,11 +60,18 @@ class NameCaptureController:
 
             if not name_extraction_result['success']:
                 print("Error: No valid name found")
+                
+                # Crear mensaje de error personalizado según el idioma detectado
+                error_base_message = "Please provide a valid name (avoid using only numbers or symbols)"
+                translated_error = self.chatgpt.translate_message(error_base_message, detected_language)
+                
                 return {
                     'success': False, 
-                    'message': 'No valid name found in text',
+                    'message': translated_error,
                     'type': 'bot',
-                    'isError': True
+                    'isError': True,
+                    'error_type': 'invalid_name_format',
+                    'detected_language': detected_language
                 }
 
             name = name_extraction_result['name']
@@ -117,7 +124,12 @@ class NameCaptureController:
         :param detected_language: Idioma detectado
         :return: Diccionario de respuesta
         """
-        base_message = f"Welcome back {name}! Would you like to connect with our experts?"
+        # Comprobar si el nombre es válido o es "No_name"
+        if name and name != "No_name":
+            base_message = f"Welcome back {name}! Would you like to connect with our experts?"
+        else:
+            base_message = "Welcome back! Would you like to connect with our experts?"
+            
         translated_message = self.chatgpt.translate_message(base_message, detected_language)
         print(f"Translated welcome message: {translated_message}")
         

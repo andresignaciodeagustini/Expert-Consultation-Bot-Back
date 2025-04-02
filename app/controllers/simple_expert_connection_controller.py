@@ -1,4 +1,5 @@
 from src.utils.chatgpt_helper import ChatGPTHelper
+import re
 
 class SimpleExpertConnectionController:
     def __init__(self):
@@ -29,6 +30,48 @@ class SimpleExpertConnectionController:
             'text': data['text']
         }
 
+    def _is_nonsense_text(self, text):
+        """
+        Detecta si el texto parece no tener sentido para búsqueda de empresas
+        
+        :param text: Texto a evaluar
+        :return: True si parece ser texto sin sentido, False en caso contrario
+        """
+        # Quitar espacios extras
+        text = text.strip().lower()
+        
+        # Texto muy corto (menor a 3 caracteres)
+        if len(text) < 3:
+            return True
+            
+        # Solo números
+        if re.match(r'^[0-9]+$', text):
+            return True
+            
+        # Palabras cortas sin contexto como "dogs", "cat", etc.
+        if re.match(r'^[a-z]+$', text.lower()) and len(text) < 5:
+            return True
+            
+        # Verificar patrones comunes de teclado
+        keyboard_patterns = ['asdf', 'qwer', 'zxcv', '1234', 'hjkl', 'uiop']
+        for pattern in keyboard_patterns:
+            if pattern in text.lower():
+                return True
+            
+        # Texto aleatorio (una sola palabra larga sin espacios)
+        if len(text.split()) == 1 and len(text) > 8:
+            # Verificar si tiene una distribución de caracteres poco natural
+            # Caracteres raros o poco comunes en muchos idiomas
+            rare_chars = len(re.findall(r'[qwxzjkvfy]', text.lower()))
+            if rare_chars / len(text) > 0.3:  # Alta proporción de caracteres poco comunes
+                return True
+            
+            # Patrones repetitivos
+            if any(text.count(c) > len(text) * 0.4 for c in text):  # Un carácter repetido muchas veces
+                return True
+                
+        return False
+
     def process_simple_expert_connection(self, data):
         """
         Procesar conexión simple de experto
@@ -53,6 +96,21 @@ class SimpleExpertConnectionController:
             )
             detected_language = text_processing_result.get('detected_language', 'en')
             self.last_detected_language = detected_language
+            
+            # Verificar si el texto parece no tener sentido
+            if self._is_nonsense_text(validation_result['text']):
+                guidance_message = self.chatgpt.translate_message(
+                    "Please enter specific company names you're interested in (for example: 'Google, Microsoft, Amazon') or type 'no' if you don't have specific companies in mind.",
+                    detected_language
+                )
+                
+                return {
+                    'success': False,
+                    'message': guidance_message,
+                    'preselected_companies': [],
+                    'detected_language': detected_language,
+                    'status_code': 400
+                }
 
             # Extraer empresas del texto
             companies_response = self.chatgpt.process_company_response(

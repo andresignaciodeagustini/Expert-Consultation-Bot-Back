@@ -1,6 +1,7 @@
 from src.utils.chatgpt_helper import ChatGPTHelper
 from src.services.external.zoho_services import ZohoService
 from app.services.excluded_companies_service import ExcludedCompaniesService
+import re
 # Importar funciones de gestión de idioma global
 from app.constants.language import (
     get_last_detected_language, 
@@ -21,7 +22,8 @@ class ExcludeCompaniesController:
             'ask_exclusions': "Are there any companies that should be excluded from the search?",
             'no_exclusions': "Understood, there are no companies to exclude.",
             'exclusions_confirmed': "Understood, we will exclude the following companies from the search: {companies}",
-            'processing_error': "An error occurred while processing your request."
+            'processing_error': "An error occurred while processing your request.",
+            'nonsense_input': "Please provide a valid response. Are there any companies that should be excluded from the search? If yes, please list them, or respond with 'no' if there aren't any to exclude."
         }
 
     def validate_input(self, data):
@@ -37,10 +39,67 @@ class ExcludeCompaniesController:
                 'error': 'No data provided'
             }
         
+        # Verificar si el campo 'answer' contiene texto sin sentido
+        if 'answer' in data and self._is_nonsense_text(data['answer']):
+            return {
+                'is_valid': False,
+                'error': 'nonsense_input',
+                'data': data
+            }
+        
         return {
             'is_valid': True,
             'data': data
         }
+        
+    def _is_nonsense_text(self, text):
+        """
+        Detecta si el texto parece no tener sentido
+        
+        :param text: Texto a evaluar
+        :return: True si parece ser texto sin sentido, False en caso contrario
+        """
+        if not text:
+            return False
+            
+        # Quitar espacios extras
+        text = text.strip().lower()
+        
+        # Aceptar explícitamente "no" como entrada válida
+        if text in ['no', 'n']:
+            return False
+        
+        # Texto muy corto (menor a 3 caracteres)
+        if len(text) < 3 and text not in ['no', 'n']:
+            return True
+            
+        # Solo números
+        if re.match(r'^[0-9]+$', text):
+            return True
+            
+        # Palabras cortas sin contexto como "dogs", "cat", etc.
+        if re.match(r'^[a-z]+$', text.lower()) and len(text) < 5 and text not in ['no', 'n']:
+            return True
+            
+        # Verificar patrones comunes de teclado
+        keyboard_patterns = ['asdf', 'qwer', 'zxcv', '1234', 'hjkl', 'uiop']
+        for pattern in keyboard_patterns:
+            if pattern in text.lower():
+                return True
+            
+        # Texto aleatorio (una sola palabra larga sin espacios)
+        if len(text.split()) == 1 and len(text) > 8:
+            # Verificar si tiene una distribución de caracteres poco natural
+            # Caracteres raros o poco comunes en muchos idiomas
+            rare_chars = len(re.findall(r'[qwxzjkvfy]', text.lower()))
+            if rare_chars / len(text) > 0.3:  # Alta proporción de caracteres poco comunes
+                return True
+            
+            # Patrones repetitivos
+            if any(text.count(c) > len(text) * 0.4 for c in text):  # Un carácter repetido muchas veces
+                return True
+                
+        return False
 
     def process_exclude_companies(self, data):
         """
@@ -53,6 +112,26 @@ class ExcludeCompaniesController:
             # Validar entrada
             validation_result = self.validate_input(data)
             if not validation_result['is_valid']:
+                # Verificar si es por texto sin sentido
+                if validation_result.get('error') == 'nonsense_input':
+                    # Procesar idioma para el mensaje de error
+                    detected_language = self._process_language(validation_result['data'])
+                    
+                    # Mensaje guía para el usuario, que reestablece la pregunta original
+                    guidance_message = self.chatgpt.translate_message(
+                        self.BASE_MESSAGES['nonsense_input'], 
+                        detected_language
+                    )
+                    
+                    return {
+                        'success': False,
+                        'message': guidance_message,
+                        'detected_language': detected_language,
+                        'has_excluded_companies': False,
+                        'excluded_companies': None,
+                        'status_code': 400
+                    }
+                
                 return {
                     'success': False,
                     'error': validation_result['error'],
@@ -170,9 +249,13 @@ class ExcludeCompaniesController:
         :param detected_language: Idioma detectado
         :return: Respuesta procesada
         """
+        # Comprobación directa para 'no' antes del procesamiento
+        if answer.lower().strip() in ['no', 'n']:
+            return self._handle_no_exclusions(detected_language)
+        
         processed_response = self.chatgpt.process_company_response(answer)
 
-        if processed_response == "no" or answer.lower() in ['no', 'n']:
+        if processed_response == "no":
             return self._handle_no_exclusions(detected_language)
         
         if isinstance(processed_response, dict):

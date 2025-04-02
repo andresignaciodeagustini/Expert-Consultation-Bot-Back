@@ -1,5 +1,6 @@
 from src.utils.chatgpt_helper import ChatGPTHelper
 from src.services.external.zoho_services import ZohoService
+import re
 # Importar funciones de gestión de idioma global
 from app.constants.language import (
     get_last_detected_language, 
@@ -21,6 +22,7 @@ class EmploymentStatusController:
             },
             'normalize_prompt': "Translate this employment preference to one of these options: 'current', 'previous', or 'both': ",
             'invalid_option': "Please select one of the available options: current, previous, or both.",
+            'nonsense_input': "Please provide a valid response. Would you prefer experts who currently work at these companies, who worked there previously, or both options?",
             'processing_error': "Error processing your response"
         }
 
@@ -40,10 +42,65 @@ class EmploymentStatusController:
             }
         
         print(f"Received data: {data}")
+        
+        # Verificar si tiene un status y si es texto sin sentido
+        if 'status' in data and self._is_nonsense_text(data['status']):
+            print("Nonsense text detected in status")
+            return {
+                'is_valid': False,
+                'error': 'nonsense_input',
+                'data': data
+            }
+        
         return {
             'is_valid': True,
             'data': data
         }
+        
+    def _is_nonsense_text(self, text):
+        """
+        Detecta si el texto parece no tener sentido
+        
+        :param text: Texto a evaluar
+        :return: True si parece ser texto sin sentido, False en caso contrario
+        """
+        if not text:
+            return False
+            
+        # Quitar espacios extras
+        text = text.strip().lower()
+        
+        # Texto muy corto (menor a 3 caracteres)
+        if len(text) < 3:
+            return True
+            
+        # Solo números
+        if re.match(r'^[0-9]+$', text):
+            return True
+            
+        # Palabras cortas sin contexto como "dogs", "cat", etc.
+        if re.match(r'^[a-z]+$', text.lower()) and len(text) < 5:
+            return True
+            
+        # Verificar patrones comunes de teclado
+        keyboard_patterns = ['asdf', 'qwer', 'zxcv', '1234', 'hjkl', 'uiop']
+        for pattern in keyboard_patterns:
+            if pattern in text.lower():
+                return True
+            
+        # Texto aleatorio (una sola palabra larga sin espacios)
+        if len(text.split()) == 1 and len(text) > 8:
+            # Verificar si tiene una distribución de caracteres poco natural
+            # Caracteres raros o poco comunes en muchos idiomas
+            rare_chars = len(re.findall(r'[qwxzjkvfy]', text.lower()))
+            if rare_chars / len(text) > 0.3:  # Alta proporción de caracteres poco comunes
+                return True
+            
+            # Patrones repetitivos
+            if any(text.count(c) > len(text) * 0.4 for c in text):  # Un carácter repetido muchas veces
+                return True
+                
+        return False
 
     def process_employment_status(self, data):
         """
@@ -58,6 +115,25 @@ class EmploymentStatusController:
             # Validar entrada
             validation_result = self.validate_input(data)
             if not validation_result['is_valid']:
+                # Verificar si es por texto sin sentido
+                if validation_result.get('error') == 'nonsense_input':
+                    # Procesar idioma para el mensaje de error
+                    detected_language = self._process_language(validation_result['data'])
+                    
+                    # Mensaje guía para el usuario, que reestablece la pregunta original
+                    guidance_message = self.chatgpt.translate_message(
+                        self.BASE_MESSAGES['nonsense_input'], 
+                        detected_language
+                    )
+                    
+                    return {
+                        'success': False,
+                        'message': guidance_message,
+                        'has_status': False,
+                        'detected_language': detected_language,
+                        'status_code': 400
+                    }
+                
                 return {
                     'success': False,
                     'error': validation_result['error'],
