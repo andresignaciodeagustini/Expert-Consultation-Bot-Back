@@ -150,10 +150,94 @@ class ChatGPTHelper:
 
     def translate_message(self, message: str, target_language: str) -> str:
         try:
+            # Mapeo completo de códigos de idioma a nombres de idioma
+            language_mapping = {
+                # Europeos
+                'es-ES': 'Spanish',  # Español
+                'en-US': 'English',  # Inglés (EE.UU.)
+                'en-GB': 'British English',  # Inglés (Reino Unido)
+                'fr-FR': 'French',  # Francés
+                'de-DE': 'German',  # Alemán
+                'it-IT': 'Italian',  # Italiano
+                'pt-PT': 'Portuguese (Portugal)',  # Portugués (Portugal)
+                'pt-BR': 'Portuguese (Brazil)',  # Portugués (Brasil)
+                'ru-RU': 'Russian',  # Ruso
+                'uk-UA': 'Ukrainian',  # Ucraniano
+                'pl-PL': 'Polish',  # Polaco
+                'nl-NL': 'Dutch',  # Neerlandés/Holandés
+                'el-GR': 'Greek',  # Griego
+                'cs-CZ': 'Czech',  # Checo
+                'sv-SE': 'Swedish',  # Sueco
+                'da-DK': 'Danish',  # Danés
+                'fi-FI': 'Finnish',  # Finlandés
+                'no-NO': 'Norwegian',  # Noruego
+                'ro-RO': 'Romanian',  # Rumano
+                'hu-HU': 'Hungarian',  # Húngaro
+                'bg-BG': 'Bulgarian',  # Búlgaro
+                'hr-HR': 'Croatian',  # Croata
+                'sr-RS': 'Serbian',  # Serbio
+                'sk-SK': 'Slovak',  # Eslovaco
+                'sl-SI': 'Slovenian',  # Esloveno
+                'lt-LT': 'Lithuanian',  # Lituano
+                'lv-LV': 'Latvian',  # Letón
+                'et-EE': 'Estonian',  # Estonio
+                
+                # Asiáticos
+                'zh-CN': 'Chinese (Simplified)',  # Chino (Simplificado)
+                'zh-TW': 'Chinese (Traditional)',  # Chino (Tradicional)
+                'ja-JP': 'Japanese',  # Japonés
+                'ko-KR': 'Korean',  # Coreano
+                'th-TH': 'Thai',  # Tailandés
+                'vi-VN': 'Vietnamese',  # Vietnamita
+                'hi-IN': 'Hindi',  # Hindi
+                'bn-IN': 'Bengali',  # Bengalí
+                'ur-PK': 'Urdu',  # Urdu
+                'ar-SA': 'Arabic',  # Árabe (Arabia Saudita)
+                'fa-IR': 'Persian',  # Persa/Farsi
+                'tr-TR': 'Turkish',  # Turco
+                'he-IL': 'Hebrew',  # Hebreo
+                'id-ID': 'Indonesian',  # Indonesio
+                'ms-MY': 'Malay',  # Malayo
+                'tl-PH': 'Tagalog',  # Tagalo/Filipino
+                
+                # Africanos
+                'sw-KE': 'Swahili',  # Swahili
+                'am-ET': 'Amharic',  # Amhárico
+                'ha-NG': 'Hausa',  # Hausa
+                'yo-NG': 'Yoruba',  # Yoruba
+                'zu-ZA': 'Zulu',  # Zulú
+                'af-ZA': 'Afrikaans',  # Afrikáans
+                
+                # Otros
+                'ka-GE': 'Georgian',  # Georgiano
+                'hy-AM': 'Armenian',  # Armenio
+                'az-AZ': 'Azerbaijani',  # Azerbaiyano
+                'kk-KZ': 'Kazakh',  # Kazajo
+                'uz-UZ': 'Uzbek',  # Uzbeko
+                'mn-MN': 'Mongolian',  # Mongol
+                'ta-IN': 'Tamil',  # Tamil
+                'te-IN': 'Telugu',  # Telugu
+                'ml-IN': 'Malayalam',  # Malayalam
+                'kn-IN': 'Kannada',  # Kannada
+                'mr-IN': 'Marathi',  # Marathi
+                'gu-IN': 'Gujarati',  # Gujarati
+                'pa-IN': 'Punjabi',  # Punjabi
+            }
+            
+            # Obtener el nombre del idioma o usar el código si no está mapeado
+            language_name = language_mapping.get(target_language, target_language)
+            
+            # Log para depuración
+            logger.info(f"Translating message to {language_name} (code: {target_language})")
+            
             messages = [
                 {
                     "role": "system",
-                    "content": f"You are a translator. Translate the following text to {target_language}. Only provide the translation, nothing else."
+                    "content": f"""You are a translator. Translate the following text to {language_name}.
+                    Only provide the translation, nothing else.
+                    Ensure the translation is natural and fluent in {language_name}.
+                    For languages with different writing systems (like Russian, Chinese, Arabic), use the native script.
+                    """
                 },
                 {
                     "role": "user",
@@ -167,11 +251,16 @@ class ChatGPTHelper:
                 temperature=0.3
             )
 
-            return response.choices[0].message.content.strip()
+            translated_text = response.choices[0].message.content.strip()
+            
+            # Log para depuración
+            logger.info(f"Original: '{message}' -> Translated: '{translated_text}'")
+            
+            return translated_text
 
         except Exception as e:
             logger.error(f"Translation error: {str(e)}")
-            return message  # Retorna el mensaje original si hay error
+            return message  
     
     def process_text_input(self, text: str, previous_language: str = None) -> Dict:
         try:
@@ -1674,21 +1763,57 @@ class ChatGPTHelper:
 
     def extract_region(self, location: str) -> Dict:
         try:
-            # Si el texto es muy corto o no parece una ubicación, rechazarlo de inmediato
-            if len(location.strip()) < 3 or any(char.isdigit() for char in location):
-                logger.warning(f"Invalid location input: {location}")
+            # Si el texto es muy corto, rechazarlo de inmediato
+            if len(location.strip()) < 2:
+                logger.warning(f"Invalid location input (too short): {location}")
                 return {
                     "success": False,
                     "error": "Please provide a valid geographical location."
                 }
-                
+            
             logger.info(f"Identifying region for location: {location}")
             
-            # Primero verificar si la entrada parece una ubicación geográfica
+            # Mapeo directo de regiones comunes en varios idiomas
+            region_mapping = {
+                # Ruso
+                "америка": "North America",
+                "северная америка": "North America",
+                "европа": "Europe",
+                "азия": "Asia",
+                
+                # Inglés
+                "america": "North America",
+                "north america": "North America",
+                "europe": "Europe",
+                "asia": "Asia",
+                
+                # Español
+                "américa": "North America",
+                "américa del norte": "North America",
+                "europa": "Europe",
+                "asia": "Asia"
+            }
+            
+            # Verificar si hay una correspondencia directa (insensible a mayúsculas/minúsculas)
+            normalized_location = location.lower().strip()
+            if normalized_location in region_mapping:
+                logger.info(f"Location '{location}' directly mapped to {region_mapping[normalized_location]}")
+                return {
+                    "success": True,
+                    "region": region_mapping[normalized_location],
+                    "original_location": location,
+                    "mapping_method": "direct"
+                }
+            
+            # Primero verificar si la entrada parece una ubicación geográfica con instrucciones multilingües
             validation_messages = [
                 {
                     "role": "system",
-                    "content": "You are a geography expert. Determine if the input is a valid geographical location or region. Respond with 'YES' if it's a valid location, or 'NO' followed by a brief explanation if it's not."
+                    "content": """You are a geography expert with multilingual capabilities. 
+                    The user might input location names in any language, including Russian, Spanish, and others.
+                    Recognize geographical entities regardless of language.
+                    ONLY respond with 'YES' if it's a valid geographical location or region, or 'NO' if it's not.
+                    Do not add any explanations or extra words."""
                 },
                 {
                     "role": "user",
@@ -1699,41 +1824,56 @@ class ChatGPTHelper:
             validation_response = self.client.chat.completions.create(
                 model="gpt-4",
                 messages=validation_messages,
-                temperature=0.3
+                temperature=0.1
             )
             
-            validation_result = validation_response.choices[0].message.content.strip()
+            validation_result = validation_response.choices[0].message.content.strip().upper()
             
             # Si no es una ubicación válida, retornar error
-            if validation_result.startswith("NO"):
+            if validation_result != "YES":
                 logger.warning(f"Input is not a valid location: {location}")
                 return {
                     "success": False,
                     "error": "Please provide a valid geographical location."
                 }
             
-            # Si parece válido, proceder con la categorización de región
+            # Si parece válido, proceder con la categorización de región con instrucciones multilingües
             messages = [
                 {
                     "role": "system",
-                    "content": "You are a geography expert. You must categorize locations into one of these regions: North America, Europe, or Asia. Only respond with one of these three options. If the location doesn't clearly belong to any of these regions, respond with 'OTHER'."
+                    "content": """You are a geography expert with multilingual capabilities.
+                    You must categorize locations into one of these regions: North America, Europe, or Asia.
+                    The input location might be in any language, including Russian, Spanish, etc.
+                    ALWAYS respond in English with ONLY ONE of these three options: 'North America', 'Europe', or 'Asia'.
+                    If the location doesn't clearly belong to any of these regions, respond with 'OTHER'.
+                    Do not include any other text in your response."""
                 },
                 {
                     "role": "user",
-                    "content": f"Which region (North America, Europe, or Asia) does {location} belong to? Only respond with the region name or 'OTHER' if it doesn't fit."
+                    "content": f"Which region does this location belong to: '{location}'? Respond only with 'North America', 'Europe', 'Asia', or 'OTHER'."
                 }
             ]
             
             response = self.client.chat.completions.create(
                 model="gpt-4",
                 messages=messages,
-                temperature=0.3
+                temperature=0.1
             )
             
             region = response.choices[0].message.content.strip()
             
-            if region not in ["North America", "Europe", "Asia"]:
-                logger.warning(f"Invalid region response: {region}")
+            # Normalizar la respuesta para asegurar coincidencia exacta
+            if "north america" in region.lower():
+                region = "North America"
+            elif "europe" in region.lower():
+                region = "Europe"
+            elif "asia" in region.lower():
+                region = "Asia"
+            else:
+                region = "OTHER"
+            
+            if region == "OTHER":
+                logger.warning(f"Location '{location}' does not belong to accepted regions")
                 return {
                     "success": False,
                     "error": "Please specify a location in North America, Europe, or Asia."
@@ -1743,7 +1883,8 @@ class ChatGPTHelper:
             return {
                 "success": True,
                 "region": region,
-                "original_location": location
+                "original_location": location,
+                "mapping_method": "ai"
             }
             
         except Exception as e:
@@ -1753,6 +1894,142 @@ class ChatGPTHelper:
                 "error": str(e)
             }
         
+    def detect_multilingual_region(self, text: str, current_language: str = None) -> Dict:
+        """
+        Detecta la región y el idioma del texto proporcionado, con soporte multilingüe.
+        
+        :param text: Texto a analizar
+        :param current_language: Idioma actual detectado previamente
+        :return: Diccionario con resultados de la detección
+        """
+        try:
+            logger.info(f"Detecting multilingual region for text: {text}")
+            
+            # Mapeo directo de regiones comunes en varios idiomas
+            region_mapping = {
+                # Ruso
+                "америка": "North America",
+                "северная америка": "North America",
+                "европа": "Europe",
+                "азия": "Asia",
+                
+                # Inglés
+                "america": "North America",
+                "north america": "North America",
+                "europe": "Europe",
+                "asia": "Asia",
+                
+                # Español
+                "américa": "North America",
+                "américa del norte": "North America",
+                "europa": "Europe",
+                "asia": "Asia"
+            }
+            
+            # Verificar si hay una correspondencia directa (insensible a mayúsculas/minúsculas)
+            normalized_text = text.lower().strip()
+            if normalized_text in region_mapping:
+                logger.info(f"Text '{text}' directly mapped to region {region_mapping[normalized_text]}")
+                
+                # Mantener el idioma actual si está disponible
+                detected_language = current_language or "en-US"
+                
+                return {
+                    "success": True,
+                    "region": region_mapping[normalized_text],
+                    "original_text": text,
+                    "detected_language": detected_language,
+                    "mapping_method": "direct"
+                }
+            
+            # Si no hay mapeo directo, usar el procesamiento de texto para detectar idioma
+            text_processing = self.process_text_input(text, current_language)
+            detected_language = text_processing.get("detected_language", current_language or "en-US")
+            
+            # Usar extract_region para obtener la región
+            region_result = self.extract_region(text)
+            
+            # Si extract_region fue exitoso, combinar los resultados
+            if region_result.get("success", False):
+                return {
+                    "success": True,
+                    "region": region_result["region"],
+                    "original_text": text,
+                    "detected_language": detected_language,
+                    "mapping_method": "extract"
+                }
+            
+            # Si no se pudo extraer la región, intentar con un enfoque multilingüe específico
+            messages = [
+                {
+                    "role": "system",
+                    "content": """You are a geography expert with multilingual capabilities.
+                    You must identify if the input refers to one of these regions: North America, Europe, or Asia.
+                    The input might be in any language, including Russian, Spanish, etc.
+                    
+                    If the input refers to one of these regions, respond with ONLY the region name in English.
+                    If it doesn't, respond with 'OTHER'.
+                    
+                    Examples:
+                    - "América" -> "North America"
+                    - "Европа" -> "Europe"
+                    - "Asia" -> "Asia"
+                    - "London" -> "Europe"
+                    - "Tokyo" -> "Asia"
+                    - "New York" -> "North America"
+                    - "Australia" -> "OTHER"
+                    """
+                },
+                {
+                    "role": "user",
+                    "content": f"Identify the region for: '{text}'"
+                }
+            ]
+            
+            response = self.client.chat.completions.create(
+                model="gpt-4",
+                messages=messages,
+                temperature=0.1
+            )
+            
+            region = response.choices[0].message.content.strip()
+            
+            # Normalizar la respuesta
+            normalized_region = region.lower()
+            if "north america" in normalized_region:
+                region = "North America"
+            elif "europe" in normalized_region:
+                region = "Europe"
+            elif "asia" in normalized_region:
+                region = "Asia"
+            else:
+                region = "OTHER"
+            
+            if region == "OTHER":
+                logger.warning(f"Text '{text}' does not belong to accepted regions")
+                return {
+                    "success": False,
+                    "error": "Region not identified or not in accepted regions",
+                    "detected_language": detected_language
+                }
+            
+            logger.info(f"Text '{text}' identified as region {region} using multilingual detection")
+            return {
+                "success": True,
+                "region": region,
+                "original_text": text,
+                "detected_language": detected_language,
+                "mapping_method": "multilingual"
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in multilingual region detection: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e),
+                "detected_language": current_language or "en-US"
+            }
+            
 
 
     def extract_work_timing(self, text: str) -> str:

@@ -59,38 +59,46 @@ class TextProcessingController:
             
             input_text = validation_result['text']
             
-            # Obtener el último idioma detectado globalmente
-            current_language = get_last_detected_language()
-            
-            # Detección multilingüe de región
-            region_detection = self.chatgpt.detect_multilingual_region(
-                input_text, 
-                current_language
-            )
-            
-            # Verificar si la detección de región fue exitosa
-            if not region_detection.get('success', False):
-                self.logger.warning("Multilingual region detection failed")
+            # MODIFICACIÓN: Verificar si el idioma viene en la solicitud
+            if 'language' in data and data['language']:
+                # Usar el idioma proporcionado en la solicitud directamente
+                detected_language = data['language']
+                # Actualizar idioma global
+                update_last_detected_language(detected_language)
+                self.logger.info(f"Using language from request: {detected_language}")
+            else:
+                # Si no hay idioma en la solicitud, seguir con el flujo original
+                current_language = get_last_detected_language()
                 
-                # Usar detección de idioma de respaldo
-                text_processing_result = self.chatgpt.process_text_input(
+                # Detección multilingüe de región
+                region_detection = self.chatgpt.detect_multilingual_region(
                     input_text, 
                     current_language
                 )
                 
-                detected_language = text_processing_result.get('detected_language', 'en-US')
-            else:
-                # Usar el idioma detectado por la detección multilingüe
-                detected_language = region_detection.get('detected_language', 'en-US')
+                # Verificar si la detección de región fue exitosa
+                if not region_detection.get('success', False):
+                    self.logger.warning("Multilingual region detection failed")
+                    
+                    # Usar detección de idioma de respaldo
+                    text_processing_result = self.chatgpt.process_text_input(
+                        input_text, 
+                        current_language
+                    )
+                    
+                    detected_language = text_processing_result.get('detected_language', 'en-US')
+                else:
+                    # Usar el idioma detectado por la detección multilingüe
+                    detected_language = region_detection.get('detected_language', 'en-US')
+                
+                # Actualizar idioma globalmente
+                update_last_detected_language(detected_language)
             
-            # Actualizar idioma globalmente
-            update_last_detected_language(detected_language)
-            
-            # Registro de idioma detectado
+            # Registro de idioma detectado/usado
             self.logger.info(f"Detected language: {detected_language}")
             
             # Extracción de región
-            if region_detection.get('success', False):
+            if 'region_detection' in locals() and region_detection.get('success', False):
                 # Si la detección multilingüe fue exitosa, usar su región
                 region = {
                     'success': True,
