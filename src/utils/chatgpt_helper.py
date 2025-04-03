@@ -249,8 +249,99 @@ class ChatGPTHelper:
                 else:
                     detected_language = previous_language or 'en-US'
 
-            # Asegurar que sea un código de idioma válido
-            if detected_language not in ['es-ES', 'en-US', 'fr-FR', 'de-DE', 'it-IT']:
+            # Lista de idiomas oficiales principales con sus códigos ISO
+            valid_languages = [
+                # Europeos
+                'es-ES',  # Español
+                'en-US',  # Inglés (EE.UU.)
+                'en-GB',  # Inglés (Reino Unido)
+                'fr-FR',  # Francés
+                'de-DE',  # Alemán
+                'it-IT',  # Italiano
+                'pt-PT',  # Portugués (Portugal)
+                'pt-BR',  # Portugués (Brasil)
+                'ru-RU',  # Ruso
+                'uk-UA',  # Ucraniano
+                'pl-PL',  # Polaco
+                'nl-NL',  # Neerlandés/Holandés
+                'el-GR',  # Griego
+                'cs-CZ',  # Checo
+                'sv-SE',  # Sueco
+                'da-DK',  # Danés
+                'fi-FI',  # Finlandés
+                'no-NO',  # Noruego
+                'ro-RO',  # Rumano
+                'hu-HU',  # Húngaro
+                'bg-BG',  # Búlgaro
+                'hr-HR',  # Croata
+                'sr-RS',  # Serbio
+                'sk-SK',  # Eslovaco
+                'sl-SI',  # Esloveno
+                'lt-LT',  # Lituano
+                'lv-LV',  # Letón
+                'et-EE',  # Estonio
+                
+                # Asiáticos
+                'zh-CN',  # Chino (Simplificado)
+                'zh-TW',  # Chino (Tradicional)
+                'ja-JP',  # Japonés
+                'ko-KR',  # Coreano
+                'th-TH',  # Tailandés
+                'vi-VN',  # Vietnamita
+                'hi-IN',  # Hindi
+                'bn-IN',  # Bengalí
+                'ur-PK',  # Urdu
+                'ar-SA',  # Árabe (Arabia Saudita)
+                'fa-IR',  # Persa/Farsi
+                'tr-TR',  # Turco
+                'he-IL',  # Hebreo
+                'id-ID',  # Indonesio
+                'ms-MY',  # Malayo
+                'tl-PH',  # Tagalo/Filipino
+                
+                # Africanos
+                'sw-KE',  # Swahili
+                'am-ET',  # Amhárico
+                'ha-NG',  # Hausa
+                'yo-NG',  # Yoruba
+                'zu-ZA',  # Zulú
+                'af-ZA',  # Afrikáans
+                
+                # Otros
+                'ka-GE',  # Georgiano
+                'hy-AM',  # Armenio
+                'az-AZ',  # Azerbaiyano
+                'kk-KZ',  # Kazajo
+                'uz-UZ',  # Uzbeko
+                'mn-MN',  # Mongol
+                'ta-IN',  # Tamil
+                'te-IN',  # Telugu
+                'ml-IN',  # Malayalam
+                'kn-IN',  # Kannada
+                'mr-IN',  # Marathi
+                'gu-IN',  # Gujarati
+                'pa-IN',  # Punjabi
+            ]
+
+            # Verificar si el idioma detectado es válido o extraer la parte principal
+            if detected_language:
+                # Intentar encontrar coincidencia exacta
+                if detected_language not in valid_languages:
+                    # Extraer el código de idioma base (por ejemplo, 'ru' de 'ru-RU')
+                    lang_code = detected_language.split('-')[0].lower()
+                    
+                    # Buscar cualquier variante de este idioma
+                    matching_langs = [lang for lang in valid_languages if lang.lower().startswith(f"{lang_code}-")]
+                    
+                    if matching_langs:
+                        # Usar la primera variante encontrada
+                        detected_language = matching_langs[0]
+                    else:
+                        # Si no hay coincidencias, usar el idioma anterior o inglés
+                        detected_language = previous_language or 'en-US'
+                        print(f"Unsupported language: {detected_language}, falling back to {detected_language}")
+            else:
+                # Si no se detectó ningún idioma
                 detected_language = previous_language or 'en-US'
 
             # Actualizar el idioma global
@@ -272,141 +363,6 @@ class ChatGPTHelper:
                 "detected_language": previous_language or "en-US",
                 "error": str(e)
             }
-        
-    def detect_multilingual_region(self, text: str, previous_language: str = None) -> Dict:
-        """
-        Detectar región y lenguaje de manera multilingüe
-        
-        :param text: Texto a analizar
-        :param previous_language: Idioma detectado previamente
-        :return: Diccionario con información de detección
-        """
-        try:
-            # Preprocesar texto
-            text = text.lower().strip()
-            
-            # Mapeo multilingüe de regiones
-            multilingual_regions = {
-                'europe': {
-                    'translations': {
-                        'es': ['europa', 'europeo', 'europea'],
-                        'en': ['europe', 'european'],
-                        'fr': ['europe', 'européen', 'européenne'],
-                        'de': ['europa', 'europäisch'],
-                        'it': ['europa', 'europeo', 'europea'],
-                        'pt': ['europa', 'europeu', 'europeia'],
-                        'ru': ['европа', 'европейский'],
-                        'pl': ['europa', 'europejski'],
-                        'nl': ['europa', 'europees'],
-                        'el': ['ευρώπη', 'ευρωπαϊκός'],
-                        'ar': ['أوروبا', 'أوروبي'],
-                        'zh': ['欧洲', '欧洲的']
-                    },
-                    'iso_code': 'Europe'
-                },
-                'north america': {
-                    'translations': {
-                        'es': ['norteamérica', 'norte de america', 'america del norte'],
-                        'en': ['north america', 'north american'],
-                        'fr': ['amérique du nord', 'nord-américain'],
-                        'pt': ['norte da america', 'america do norte'],
-                        'it': ['nord america', 'nord americano'],
-                        'de': ['nordamerika', 'nordamerikanisch'],
-                        'ru': ['северная америка', 'североамериканский'],
-                        'ar': ['أمريكا الشمالية'],
-                        'zh': ['北美', '北美洲']
-                    },
-                    'iso_code': 'North America'
-                },
-                'asia': {
-                    'translations': {
-                        'es': ['asia', 'asiático', 'asiática'],
-                        'en': ['asia', 'asian'],
-                        'fr': ['asie', 'asiatique'],
-                        'ru': ['азия', 'азиатский'],
-                        'ar': ['آسيا', 'آسيوي'],
-                        'hi': ['एशिया', 'एशियाई'],
-                        'zh': ['亚洲', '亚洲的'],
-                        'ja': ['アジア', 'アジア人'],
-                        'ko': ['아시아', '아시아인']
-                    },
-                    'iso_code': 'Asia'
-                }
-            }
-            
-            # Mapeo de códigos de idioma a códigos ISO
-            lang_mapping = {
-                'es': 'es-ES', 'en': 'en-US', 'fr': 'fr-FR', 
-                'it': 'it-IT', 'de': 'de-DE', 'pt': 'pt-PT',
-                'ru': 'ru-RU', 'ar': 'ar-SA', 'hi': 'hi-IN',
-                'zh': 'zh-CN', 'ja': 'ja-JP', 'ko': 'ko-KR',
-                'el': 'el-GR', 'pl': 'pl-PL', 'nl': 'nl-NL'
-            }
-            
-            # Función para buscar coincidencias
-            def find_region_match(text):
-                for region, region_data in multilingual_regions.items():
-                    for lang, translations in region_data['translations'].items():
-                        if text in [t.lower() for t in translations]:
-                            return {
-                                'region': region_data['iso_code'],
-                                'language': lang_mapping.get(lang, f'{lang}-{lang.upper()}')
-                            }
-                return None
-            
-            # Buscar coincidencia
-            region_match = find_region_match(text)
-            
-            if region_match:
-                return {
-                    'success': True,
-                    'text': text,
-                    'detected_language': region_match['language'],
-                    'region': region_match['region'],
-                    'previous_language': previous_language
-                }
-            
-            # Si no se encuentra coincidencia, intentar detección de idioma
-            try:
-                from langdetect import detect
-                
-                detected_lang = detect(text)
-                detected_language = lang_mapping.get(detected_lang, f'{detected_lang}-{detected_lang.upper()}')
-                
-                return {
-                    'success': False,
-                    'text': text,
-                    'detected_language': detected_language,
-                    'region': None,
-                    'previous_language': previous_language,
-                    'message': 'No region detected'
-                }
-            
-            except Exception:
-                # Fallback al idioma anterior
-                return {
-                    'success': False,
-                    'text': text,
-                    'detected_language': previous_language or 'en-US',
-                    'region': None,
-                    'previous_language': previous_language,
-                    'message': 'Language detection failed'
-                }
-        
-        except Exception as e:
-            logger.error(f"Error in multilingual region detection: {str(e)}")
-            return {
-                'success': False,
-                'error': str(e),
-                'detected_language': previous_language or 'en-US',
-                'previous_language': previous_language
-            }
-
-
-
-
-
-
 
 
 
