@@ -63,54 +63,107 @@ class ClientPerspectiveController:
         }
         
     def _is_nonsense_text(self, text):
-        """
-        Detecta si el texto parece no tener sentido
-        
-        :param text: Texto a evaluar
-        :return: True si parece ser texto sin sentido, False en caso contrario
-        """
         if not text:
             return False
-            
+        
         # Quitar espacios extras
         text = text.strip().lower()
         
-        # Respuestas válidas específicas para este controlador
-        valid_answers = ['yes', 'y', 'yeah', 'yep', 'si', 'sí', 'no', 'n', 'nope', 'no,', 'noo', 'yes,', 'yess']
-        if text in valid_answers:
+        # Respuestas válidas para múltiples idiomas
+        valid_answers = {
+            # Inglés
+            'en': ['yes', 'y', 'yeah', 'yep', 'no', 'n', 'nope'],
+            # Español
+            'es': ['sí', 'si', 'no'],
+            # Ruso
+            'ru': ['да', 'нет'],
+            # Alemán
+            'de': ['ja', 'nein'],
+            # Francés
+            'fr': ['oui', 'non'],
+            # Italiano
+            'it': ['sì', 'no'],
+            # Portugués
+            'pt': ['sim', 'não'],
+            # Otros idiomas...
+        }
+        
+        # Función para verificar respuestas válidas en cualquier idioma
+        def is_valid_answer(text):
+            for lang_answers in valid_answers.values():
+                if text in lang_answers:
+                    return True
             return False
-            
+        
+        if is_valid_answer(text):
+            return False
+        
         # Texto muy corto (menor a 3 caracteres)
-        if len(text) < 3 and text not in valid_answers:
+        if len(text) < 3 and not is_valid_answer(text):
             return True
-            
-        # Solo números
-        if re.match(r'^[0-9]+$', text):
-            return True
-            
-        # Palabras cortas sin contexto como "dogs", "cat", etc.
-        if re.match(r'^[a-z]+$', text.lower()) and len(text) < 5 and text not in valid_answers:
-            return True
-            
-        # Verificar patrones comunes de teclado
-        keyboard_patterns = ['asdf', 'qwer', 'zxcv', '1234', 'hjkl', 'uiop']
-        for pattern in keyboard_patterns:
-            if pattern in text.lower():
-                return True
-            
-        # Texto aleatorio (una sola palabra larga sin espacios)
-        if len(text.split()) == 1 and len(text) > 8:
-            # Verificar si tiene una distribución de caracteres poco natural
-            # Caracteres raros o poco comunes en muchos idiomas
-            rare_chars = len(re.findall(r'[qwxzjkvfy]', text.lower()))
-            if rare_chars / len(text) > 0.3:  # Alta proporción de caracteres poco comunes
-                return True
-            
-            # Patrones repetitivos
-            if any(text.count(c) > len(text) * 0.4 for c in text):  # Un carácter repetido muchas veces
-                return True
-                
+        
         return False
+
+    def _process_language(self, data):
+        """
+        Procesar y detectar idioma usando exactamente el mismo método de ExcludeCompaniesController
+        
+        :param data: Datos de la solicitud
+        :return: Idioma detectado
+        """
+        print("\n=== Language Processing ===")
+        current_language = get_last_detected_language()
+        print(f"Current detected language: {current_language}")
+        
+        try:
+            # Priorizar el idioma si está explícitamente proporcionado
+            if 'detected_language' in data:
+                detected_language = data['detected_language']
+                print(f"Language from data: {detected_language}")
+                update_last_detected_language(detected_language)
+                return detected_language
+            
+            # También verificar si hay un idioma en 'language'
+            if 'language' in data:
+                detected_language = data['language']
+                print(f"Language from data 'language' field: {detected_language}")
+                update_last_detected_language(detected_language)
+                return detected_language
+            
+            # Si hay una respuesta, procesar su idioma
+            if 'answer' in data:
+                # Manejar casos especiales de palabras cortas
+                answer = data['answer'].strip().lower()
+                if answer in ['no', 'n', 'yes', 'y', 'si', 'sí']:
+                    print(f"Special case word detected: '{answer}'. Maintaining current language: {current_language}")
+                    return current_language
+                
+                # Para respuestas normales, usar la detección
+                text_processing_result = self.chatgpt.process_text_input(
+                    data['answer'], 
+                    current_language
+                )
+                detected_language = text_processing_result.get('detected_language', current_language)
+                
+                print(f"Input answer: {data['answer']}")
+                print(f"Detected language: {detected_language}")
+                
+                # CLAVE: Mantener el idioma original de la conversación
+                if detected_language != current_language:
+                    print(f"Language detection attempted to change from {current_language} to {detected_language}")
+                    detected_language = current_language
+                
+                # Actualizar el último idioma detectado
+                update_last_detected_language(detected_language)
+                
+                return detected_language
+            
+            # Usar el último idioma detectado o el predeterminado
+            return current_language
+        
+        except Exception as e:
+            print(f"Error in language detection: {e}")
+            return current_language
 
     def process_client_perspective(self, data):
         """
@@ -175,6 +228,12 @@ class ClientPerspectiveController:
             # IMPORTANTE: Asegurarse de que el idioma detectado se actualice correctamente
             update_last_detected_language(detected_language)
             
+            # Inicializar client_companies_result con un valor predeterminado
+            client_companies_result = {
+                'success': False,
+                'content': []
+            }
+            
             # Si no hay respuesta, solicitar perspectiva
             if not validation_result['data'].get('answer'):
                 print("No answer provided, requesting initial perspective")
@@ -211,66 +270,67 @@ class ClientPerspectiveController:
                 'status_code': 500
             }
 
-    def _process_language(self, data):
+    def _handle_negative_response(self, detected_language, data):
         """
-        Procesar y detectar idioma usando exactamente el mismo método de ExcludeCompaniesController
+        Manejar respuesta negativa en el idioma detectado
         
+        :param detected_language: Idioma detectado
         :param data: Datos de la solicitud
-        :return: Idioma detectado
+        :return: Respuesta procesada
         """
-        print("\n=== Language Processing ===")
-        current_language = get_last_detected_language()
-        print(f"Current detected language: {current_language}")
+        print("\n=== Negative Response Handling ===")
         
-        try:
-            # Priorizar el idioma si está explícitamente proporcionado
-            if 'detected_language' in data:
-                detected_language = data['detected_language']
-                print(f"Language from data: {detected_language}")
-                update_last_detected_language(detected_language)
-                return detected_language
-            
-            # También verificar si hay un idioma en 'language'
-            if 'language' in data:
-                detected_language = data['language']
-                print(f"Language from data 'language' field: {detected_language}")
-                update_last_detected_language(detected_language)
-                return detected_language
-            
-            # Si hay una respuesta, procesar su idioma
-            if 'answer' in data:
-                # Manejar casos especiales de palabras cortas
-                answer = data['answer'].strip().lower()
-                if answer in ['no', 'n', 'yes', 'y', 'si', 'sí']:
-                    print(f"Special case word detected: '{answer}'. Maintaining current language: {current_language}")
-                    return current_language
-                
-                # Para respuestas normales, usar la detección
-                text_processing_result = self.chatgpt.process_text_input(
-                    data['answer'], 
-                    current_language
-                )
-                detected_language = text_processing_result.get('detected_language', current_language)
-                
-                print(f"Input answer: {data['answer']}")
-                print(f"Detected language: {detected_language}")
-                
-                # CLAVE: Mantener el idioma original de la conversación
-                if detected_language != current_language:
-                    print(f"Language detection attempted to change from {current_language} to {detected_language}")
-                    detected_language = current_language
-                
-                # Actualizar el último idioma detectado
-                update_last_detected_language(detected_language)
-                
-                return detected_language
-            
-            # Usar el último idioma detectado o el predeterminado
-            return current_language
+        # Traducir mensaje de respuesta negativa
+        response_message = self.chatgpt.translate_message(
+            self.BASE_MESSAGES['negative_response'], 
+            detected_language
+        )
         
-        except Exception as e:
-            print(f"Error in language detection: {e}")
-            return current_language
+        print(f"Response message: {response_message}")
+        
+        return {
+            'success': True,
+            'message': response_message,
+            'detected_language': detected_language,
+            'include_client_companies': False,
+            'suggested_companies': [],
+            'sector': data.get('sector'),
+            'region': data.get('region'),
+            'stage': 'response'
+        }
+
+    def _handle_unclear_response(self, detected_language):
+        """
+        Manejar respuesta poco clara en el idioma detectado
+        
+        :param detected_language: Idioma detectado
+        :return: Respuesta procesada
+        """
+        print("\n=== Unclear Response Handling ===")
+        
+        # Traducir mensaje de solicitud de aclaración
+        response_message = self.chatgpt.translate_message(
+            self.BASE_MESSAGES['unclear_response'], 
+            detected_language
+        )
+        
+        print(f"Response message: {response_message}")
+        
+        return {
+            'success': False,
+            'message': response_message,
+            'detected_language': detected_language,
+            'stage': 'clarification'
+        }
+
+    def reset_last_detected_language(self, language='en-US'):
+        """
+        Resetear el último idioma detectado
+        
+        :param language: Idioma por defecto
+        """
+        print(f"\n=== Resetting Last Detected Language to: {language} ===")
+        reset_last_detected_language()
 
     def _request_initial_perspective(self, detected_language, data):
         """
@@ -359,7 +419,7 @@ class ClientPerspectiveController:
             except Exception as e:
                 print(f"Error getting excluded companies: {e}")
         
-            # AQUÍ ESTÁ LA CORRECCIÓN: Usar get_client_side_companies en lugar de get_client_companies
+            # Usar get_client_side_companies
             client_companies_result = self.chatgpt.get_client_side_companies(
                 sector=data.get('sector', 'Financial Services'),
                 geography=data.get('region', 'Europe'),
@@ -391,7 +451,6 @@ class ClientPerspectiveController:
                 detected_language
             )
             
-            # Estructura similar a la del SupplyChainExperienceController
             return {
                 'success': True,
                 'message': inclusion_message,
@@ -420,62 +479,66 @@ class ClientPerspectiveController:
 
     def _handle_negative_response(self, detected_language, data):
         """
-        Manejar respuesta negativa en el idioma detectado
+        Manejar respuesta negativa en el idioma detectado con manejo de errores y registro detallado
         
         :param detected_language: Idioma detectado
         :param data: Datos de la solicitud
         :return: Respuesta procesada
         """
-        print("\n=== Negative Response Handling ===")
+        try:
+            print("\n=== Negative Response Handling ===")
+            
+            # Imprimir información de contexto
+            print(f"Detected Language: {detected_language}")
+            print(f"Input Data: {data}")
+            
+            # Traducir mensaje de respuesta negativa con manejo de errores
+            try:
+                response_message = self.chatgpt.translate_message(
+                    self.BASE_MESSAGES['negative_response'], 
+                    detected_language
+                )
+                print(f"Translated Response Message: {response_message}")
+            except Exception as translation_error:
+                print(f"Translation Error: {translation_error}")
+                # Usar mensaje por defecto si la traducción falla
+                response_message = self.BASE_MESSAGES['negative_response']
+            
+            # Preparar datos de respuesta con información contextual
+            response = {
+                'success': True,
+                'message': response_message,
+                'detected_language': detected_language,
+                'include_client_companies': False,
+                'suggested_companies': [],
+                'sector': data.get('sector'),
+                'region': data.get('region'),
+                'stage': 'response',
+                'status_code': 200
+            }
+            
+            # Registro adicional para depuración
+            print("\n=== Negative Response Details ===")
+            print(f"Sector: {response['sector']}")
+            print(f"Region: {response['region']}")
+            print(f"Success: {response['success']}")
+            
+            return response
         
-        # Traducir mensaje de respuesta negativa
-        response_message = self.chatgpt.translate_message(
-            self.BASE_MESSAGES['negative_response'], 
-            detected_language
-        )
-        
-        print(f"Response message: {response_message}")
-        
-        return {
-            'success': True,
-            'message': response_message,
-            'detected_language': detected_language,
-            'include_client_companies': False,
-            'suggested_companies': [],
-            'sector': data.get('sector'),
-            'region': data.get('region'),
-            'stage': 'response'
-        }
-
-    def _handle_unclear_response(self, detected_language):
-        """
-        Manejar respuesta poco clara en el idioma detectado
-        
-        :param detected_language: Idioma detectado
-        :return: Respuesta procesada
-        """
-        print("\n=== Unclear Response Handling ===")
-        
-        # Traducir mensaje de solicitud de aclaración
-        response_message = self.chatgpt.translate_message(
-            self.BASE_MESSAGES['unclear_response'], 
-            detected_language
-        )
-        
-        print(f"Response message: {response_message}")
-        
-        return {
-            'success': False,
-            'message': response_message,
-            'detected_language': detected_language,
-            'stage': 'clarification'
-        }
-
-    def reset_last_detected_language(self, language='en-US'):
-        """
-        Resetear el último idioma detectado
-        
-        :param language: Idioma por defecto
-        """
-        print(f"\n=== Resetting Last Detected Language to: {language} ===")
-        reset_last_detected_language()
+        except Exception as e:
+            print(f"\n=== Error in _handle_negative_response ===")
+            print(f"Unexpected error: {str(e)}")
+            
+            # Manejo de errores inesperados
+            error_message = self.chatgpt.translate_message(
+                self.BASE_MESSAGES['processing_error'], 
+                detected_language
+            )
+            
+            return {
+                'success': False,
+                'message': error_message,
+                'error': str(e),
+                'detected_language': detected_language,
+                'status_code': 500
+            }
