@@ -4,7 +4,7 @@ import requests
 import logging
 from src.utils.chatgpt_helper import ChatGPTHelper
 
-class EnhancedWelcomeController:
+class WelcomeController:
     def __init__(self):
         self.last_detected_language = 'en'
         self.chatgpt = ChatGPTHelper()
