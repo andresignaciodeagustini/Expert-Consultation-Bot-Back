@@ -2,6 +2,7 @@ import traceback
 from src.utils.chatgpt_helper import ChatGPTHelper
 # Importar funciones de gestión de idioma global
 from app.constants.language import get_last_detected_language, update_last_detected_language
+import re
 
 class NameCaptureController:
     def __init__(self):
@@ -42,9 +43,15 @@ class NameCaptureController:
             )
             detected_language = text_processing_result.get('detected_language', previous_language)
 
-            # Si el texto es muy corto (menos de 6 caracteres), mantener el idioma anterior
-            if len(data['text']) <= 15:
+            # Solo mantener el idioma anterior si el texto es corto Y no contiene caracteres especiales
+            non_latin_pattern = re.compile(r'[^\x00-\x7F]')
+            has_non_latin = bool(non_latin_pattern.search(data['text']))
+
+            # Si el texto es muy corto pero contiene caracteres no latinos, confiar en la detección de idioma
+            # Si es solo texto latino corto, mantener el idioma anterior para evitar cambios incorrectos
+            if len(data['text']) <= 15 and not has_non_latin:
                 detected_language = previous_language
+                print(f"Short latin text detected, maintaining previous language: {previous_language}")
 
             print(f"Text processing result: {text_processing_result}")
             print(f"Detected language: {detected_language}")

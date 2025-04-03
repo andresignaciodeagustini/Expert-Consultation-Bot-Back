@@ -1296,7 +1296,7 @@ class ChatGPTHelper:
         ####################################################
 
         
-        
+    
 
     def extract_email(self, text: str) -> Dict:
         try:
@@ -1350,38 +1350,50 @@ class ChatGPTHelper:
                 "error": str(e),
                 "email": None
             }
-        
+                
 
-
-
-        
     def extract_name(self, text: str) -> Dict:
         try:
+            # Detectar si el texto contiene caracteres no latinos
+            non_latin_pattern = re.compile(r'[^\x00-\x7F]')
+            has_non_latin = bool(non_latin_pattern.search(text))
+            
+            # Instrucciones especiales para alfabetos no latinos
+            preservation_instruction = """
+            CRITICAL FOR NON-LATIN ALPHABETS (Cyrillic, Arabic, Chinese, etc.):
+            - Do NOT transliterate or convert to Latin alphabet
+            - Keep the original characters exactly as provided
+            - For names in non-Latin scripts, DO NOT convert to Latin equivalents
+            - Example: "Александр" should remain "Александр", not be converted to "Alexander"
+            """ if has_non_latin else ""
+            
             messages = [
                 {
                     "role": "system",
-                    "content": """You are a name extractor. Your task is to find and return ONLY the person's name from the input text.
+                    "content": f"""You are a name extractor. Your task is to find and return ONLY the person's name from the input text.
                     CRITICAL RULES:
                     - Return ONLY the name, nothing else
-                    - IMPORTANT: Capitalize ONLY the first letter of the name
+                    - IMPORTANT: Capitalize ONLY the first letter of the name if it uses Latin alphabet
                     - DO NOT modify or change any other part of the name
                     - Preserve the EXACT original capitalization of the rest of the name
                     - Return the full name if provided (first name and last name)
                     - If multiple names are found, return only the first one
                     - If no name is found, return 'no_name'
                     - Do not include titles (Mr., Mrs., Dr., etc.)
+                    {preservation_instruction}
 
                     CAPITALIZATION EXAMPLES:
-                    Input: "jENNIFER" → Output: "Jennyfer"
+                    Input: "jENNIFER" → Output: "Jennifer"
                     Input: "JENNIFER" → Output: "Jennifer"
                     Input: "maria jose" → Output: "Maria jose"
                     Input: "MARIA JOSE" → Output: "Maria jose"
                     Input: "mC dONALD" → Output: "Mc donald"
 
                     Strict rules:
-                    - First letter MUST be uppercase
+                    - First letter of Latin names MUST be uppercase
                     - Rest of the name MUST remain exactly as in the original text
-                    - No additional modifications allowed"""
+                    - No additional modifications allowed
+                    - NON-LATIN names must be preserved exactly as written"""
                 },
                 {
                     "role": "user",
@@ -1398,7 +1410,7 @@ class ChatGPTHelper:
 
             extracted_name = response.choices[0].message.content.strip()
             
-            if extracted_name == 'no_name':
+            if extracted_name.lower() == 'no_name':
                 return {
                     "success": False,
                     "error": "No name found in the text",
@@ -1416,7 +1428,6 @@ class ChatGPTHelper:
                 "error": str(e),
                 "name": None
             }
-
 
 
 
