@@ -562,13 +562,66 @@ class ChatGPTHelper:
                 "Agriculture": "Crop Production, Livestock, AgTech, Food Processing"
             }
             
-            # Si el área específica es "no" o está vacía, considerar como válida
-            if not specific_area or specific_area.lower() == "no":
+            # Si el área específica está vacía, considerar como válida
+            if not specific_area:
                 return {
                     "is_valid": True,
                     "specific_area": "general",
                     "displayed_area": "general"
                 }
+                
+            # Verificar si es una negación en cualquier idioma
+            try:
+                # Traducir la respuesta del usuario al inglés y detectar idioma
+                normalized_response = self.client.chat.completions.create(
+                    model="gpt-4",
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": """You are a language detector and translator.
+                            Analyze the following text and:
+                            1. If it's a form of 'no' or negative response in any language, respond with: NO|[language code]
+                            Example: NO|ru-RU for Russian "нет"
+                            2. Otherwise, translate it to English and respond with: OTHER|[language code]|[translation]
+                            
+                            Use standard language codes like en-US, es-ES, ru-RU, fr-FR, etc."""
+                        },
+                        {
+                            "role": "user",
+                            "content": specific_area
+                        }
+                    ],
+                    temperature=0.1
+                )
+                
+                # Extraer la respuesta
+                result = normalized_response.choices[0].message.content.strip()
+                parts = result.split('|')
+                
+                # Si la respuesta es NO, actualizar el idioma y devolver general
+                if parts[0] == "NO" and len(parts) >= 2:
+                    detected_language = parts[1]
+                    # Actualizar el idioma global
+                    update_last_detected_language(detected_language)
+                    self.current_language = detected_language
+                    
+                    return {
+                        "is_valid": True,
+                        "specific_area": "general",
+                        "displayed_area": "general",
+                        "detected_language": detected_language  # Añadir idioma detectado
+                    }
+            except Exception as e:
+                # Si hay un error en la normalización, continuar con la verificación estándar
+                logger.warning(f"Error normalizing response: {str(e)}")
+                
+                # Verificar literalmente "no" como respaldo
+                if specific_area.lower() == "no":
+                    return {
+                        "is_valid": True,
+                        "specific_area": "general",
+                        "displayed_area": "general"
+                    }
             
             # Verificación simple de palabras clave para áreas tecnológicas comunes
             if sector == "Technology":
@@ -706,7 +759,6 @@ class ChatGPTHelper:
                 "confidence": 0.5,
                 "note": "Accepted despite validation error"
             }
-            
 
 
 
