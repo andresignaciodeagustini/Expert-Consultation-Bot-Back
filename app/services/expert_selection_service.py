@@ -10,7 +10,15 @@ class ExpertSelectionService:
             'expert_selected': 'You have selected the expert(s):',
             'expert_not_found': 'The expert name you provided does not match any expert in the list. Please choose an expert by typing their name exactly as it is shown in the list. For example: "{example_expert}". Which expert would you like to choose?',
             'processing_error': 'An error occurred while processing your request.',
-            'thank_you': 'Thank you for your selection! We will process your request.'
+            'thank_you': 'Thank you for your selection! We will process your request.',
+            # Field labels for translation
+            'field_current_role': 'Current Role',
+            'field_current_employer': 'Company',
+            'field_experience': 'Experience',
+            'field_location': 'Location',
+            # Otros mensajes para UI
+            'screening_questions_title': 'Screening Questions',
+            'no_questions_available': 'No questions available'
         }
 
     def select_experts(self, data):
@@ -192,23 +200,76 @@ class ExpertSelectionService:
         :return: Respuesta de éxito
         """
         print("\n=== Preparing Success Response ===")
-        # Preparar detalles de expertos
+        
+        # Traducir etiquetas de campos
+        field_labels = {
+            'current_role': self.BASE_MESSAGES['field_current_role'],
+            'current_employer': self.BASE_MESSAGES['field_current_employer'],
+            'experience': self.BASE_MESSAGES['field_experience'],
+            'location': self.BASE_MESSAGES['field_location']
+        }
+        
+        # Traducir etiquetas al idioma detectado
+        translated_labels = {}
+        for key, label in field_labels.items():
+            translated_labels[key] = self.chatgpt.translate_message(label, detected_language)
+        
+        # Preparar detalles de expertos con etiquetas y valores traducidos
         expert_responses = []
         for found_expert in found_experts:
             expert = found_expert['expert']
             category = found_expert['category']
             
+            # Traducir valores de campos
+            translated_role = self.chatgpt.translate_message(
+                expert.get('current_role', 'N/A'), 
+                detected_language
+            )
+            
+            # Traducir experiencia (reemplazar "years" con su traducción)
+            experience = expert.get('experience', 'N/A')
+            years_translated = self.chatgpt.translate_message("years", detected_language)
+            translated_experience = experience.replace("years", years_translated)
+            
+            # Traducir ubicación
+            location = expert.get('location', 'N/A')
+            location_parts = location.split(", ")
+            translated_location_parts = [
+                self.chatgpt.translate_message(part, detected_language) 
+                for part in location_parts
+            ]
+            translated_location = ", ".join(translated_location_parts)
+            
             expert_response = {
                 'name': expert['name'],
-                'current_role': expert.get('current_role', 'N/A'),
+                'field_labels': translated_labels,  # Añadir las etiquetas traducidas
+                'current_role': translated_role,
                 'current_employer': expert.get('current_employer', 'N/A'),
-                'experience': expert.get('experience', 'N/A'),
-                'location': expert.get('location', 'N/A'),
+                'experience': translated_experience,
+                'location': translated_location,
                 'category': category
             }
             expert_responses.append(expert_response)
 
-        # Copiar preguntas de evaluación
+        # Traducir mensajes adicionales para UI
+        screening_title = self.chatgpt.translate_message(
+            self.BASE_MESSAGES['screening_questions_title'],
+            detected_language
+        )
+        
+        no_questions = self.chatgpt.translate_message(
+            self.BASE_MESSAGES['no_questions_available'],
+            detected_language
+        )
+
+        # Traducir categorías
+        category_labels = {
+            'main': self.chatgpt.translate_message('Main Companies', detected_language),
+            'client': self.chatgpt.translate_message('Client Companies', detected_language),
+            'supply_chain': self.chatgpt.translate_message('Supply Chain Companies', detected_language)
+        }
+
+        # Copiar y potencialmente traducir preguntas de evaluación
         category_questions = evaluation_questions.copy()
 
         # Traducir mensajes
@@ -231,6 +292,17 @@ class ExpertSelectionService:
             'screening_questions': category_questions,
             'final_message': thank_you_message,
             'detected_language': detected_language,
+            'messages': {
+                'screening_questions_title': screening_title,
+                'no_questions_available': no_questions,
+                'main_experts_title': category_labels['main'],
+                'client_experts_title': category_labels['client'],
+                'supply_chain_experts_title': category_labels['supply_chain'],
+                'current_role_label': translated_labels['current_role'],
+                'company_label': translated_labels['current_employer'],
+                'experience_label': translated_labels['experience'],
+                'location_label': translated_labels['location']
+            },
             'status_code': 200
         }
 

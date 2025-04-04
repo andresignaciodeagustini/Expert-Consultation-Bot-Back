@@ -133,26 +133,33 @@ class SectorExperienceController:
             
             # Verificar si hay un área específica proporcionada
             if 'specific_area' in data and data['specific_area']:
-                # Validar que el área específica esté relacionada con el sector
-                area_validation = self.chatgpt.validate_specific_area(data['specific_area'], sector)
+                # Verificar si la respuesta es negativa en cualquier idioma
+                is_negative = self.chatgpt.is_negative_response(data['specific_area'])
                 
-                # Si el área específica no es válida para este sector
-                if not area_validation['is_valid']:
-                    return {
-                        'success': False,
-                        'message': area_validation['message'],
-                        'error_type': 'invalid_specific_area',
-                        'type': 'bot',
-                        'isError': True,
-                        'detected_language': current_language,
-                        'step': 'specific_area_inquiry',
-                        'next_action': 'process_specific_area',
-                        'sector': sector
-                    }
-                
-                # Si es válida, actualizar data con el área estandarizada
-                data['specific_area'] = area_validation['specific_area']
-                data['displayed_area'] = area_validation['displayed_area']
+                # Si es una respuesta negativa, tratar como si no hubiera área específica
+                if is_negative:
+                    data['specific_area'] = 'no'
+                else:
+                    # Validar que el área específica esté relacionada con el sector
+                    area_validation = self.chatgpt.validate_specific_area(data['specific_area'], sector)
+                    
+                    # Si el área específica no es válida para este sector
+                    if not area_validation['is_valid']:
+                        return {
+                            'success': False,
+                            'message': area_validation['message'],
+                            'error_type': 'invalid_specific_area',
+                            'type': 'bot',
+                            'isError': True,
+                            'detected_language': current_language,
+                            'step': 'specific_area_inquiry',
+                            'next_action': 'process_specific_area',
+                            'sector': sector
+                        }
+                    
+                    # Si es válida, actualizar data con el área estandarizada
+                    data['specific_area'] = area_validation['specific_area']
+                    data['displayed_area'] = area_validation['displayed_area']
             
             # Generación de respuesta
             response = self._generate_response(displayed_sector, data, current_language)
@@ -196,8 +203,11 @@ class SectorExperienceController:
         """
         # Verificar si hay un área específica
         if 'specific_area' in data:
-            # Si el área específica es "no", "general" o está vacía
-            if not data['specific_area'] or data['specific_area'].lower() in ['no', 'general']:
+            # Detectar si es una respuesta negativa en cualquier idioma
+            is_negative = self.chatgpt.is_negative_response(data['specific_area'])
+            
+            # Si el área específica es "no", "general", está vacía o es una respuesta negativa en cualquier idioma
+            if not data['specific_area'] or data['specific_area'].lower() in ['no', 'general'] or is_negative:
                 base_message = (
                     f"{self.BASE_MESSAGES['sector_received']} "
                     f"{self.BASE_MESSAGES['ask_region']}"

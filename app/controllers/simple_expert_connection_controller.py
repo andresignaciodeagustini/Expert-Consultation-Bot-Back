@@ -1,10 +1,11 @@
 from src.utils.chatgpt_helper import ChatGPTHelper
 import re
+from app.constants.language import get_last_detected_language, update_last_detected_language, reset_last_detected_language
 
 class SimpleExpertConnectionController:
     def __init__(self):
         self.chatgpt = ChatGPTHelper()
-        self.last_detected_language = 'en'
+        # Ya no necesitamos self.last_detected_language
 
     def validate_input(self, data):
         """
@@ -89,16 +90,20 @@ class SimpleExpertConnectionController:
                     'status_code': 400
                 }
             
-            # Procesamiento de idioma
+            # Procesamiento de idioma usando el idioma global
             text_processing_result = self.chatgpt.process_text_input(
                 validation_result['text'], 
-                self.last_detected_language
+                get_last_detected_language()  # Usa la función global
             )
-            detected_language = text_processing_result.get('detected_language', 'en')
-            self.last_detected_language = detected_language
+            
+            # Obtener el idioma detectado
+            detected_language = text_processing_result.get('detected_language', get_last_detected_language())
             
             # Verificar si el texto parece no tener sentido
             if self._is_nonsense_text(validation_result['text']):
+                # Si es nonsense, usamos el idioma global sin actualizar
+                detected_language = get_last_detected_language()
+                
                 guidance_message = self.chatgpt.translate_message(
                     "Please enter specific company names you're interested in (for example: 'Google, Microsoft, Amazon') or type 'no' if you don't have specific companies in mind.",
                     detected_language
@@ -178,10 +183,10 @@ class SimpleExpertConnectionController:
             'detected_language': detected_language
         }
 
-    def reset_last_detected_language(self, language='en'):
+    def reset_last_detected_language(self, language='en-US'):
         """
         Resetear el último idioma detectado
         
         :param language: Idioma por defecto
         """
-        self.last_detected_language = language
+        reset_last_detected_language(language)  # Usa la función global

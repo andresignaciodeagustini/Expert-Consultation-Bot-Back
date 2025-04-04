@@ -1,9 +1,11 @@
 from src.utils.chatgpt_helper import ChatGPTHelper
+from app.constants.language import get_last_detected_language, update_last_detected_language
 
 class CompaniesAgreementController:
     def __init__(self):
         self.chatgpt = ChatGPTHelper()
-        self.last_detected_language = 'en-US'
+        # Utilizar el sistema global de idioma en lugar de variable local
+        # self.last_detected_language = get_last_detected_language() or 'en-US'
         
         self.BASE_MESSAGES = {
             'positive_response': "Great! Let's proceed with these companies.",
@@ -57,15 +59,18 @@ class CompaniesAgreementController:
             
             input_text = validation_result['text']
             
+            # Obtener el idioma actual del sistema global
+            current_language = get_last_detected_language() or 'en-US'
+            
             # Procesamiento de idioma
             text_processing_result = self.chatgpt.process_text_input(
                 input_text, 
-                self.last_detected_language
+                current_language
             )
-            detected_language = text_processing_result.get('detected_language', 'en-US')
+            detected_language = text_processing_result.get('detected_language', current_language)
             
-            # Actualizar idioma
-            self.last_detected_language = detected_language
+            # Actualizar idioma en el sistema global
+            update_last_detected_language(detected_language)
             
             # Extracción de intención
             intention = self.chatgpt.extract_intention(input_text)
@@ -97,12 +102,15 @@ class CompaniesAgreementController:
             return response
 
         except Exception as e:
+            # Obtener el idioma actual del sistema global
+            current_language = get_last_detected_language() or 'en-US'
+            
             # Manejo de error con traducción
             error_message = self.BASE_MESSAGES['processing_error']
             try:
                 translated_error = self.chatgpt.translate_message(
                     error_message, 
-                    self.last_detected_language
+                    current_language
                 )
             except Exception:
                 translated_error = error_message
@@ -116,7 +124,7 @@ class CompaniesAgreementController:
                 'success': False,
                 'error': translated_error,
                 'details': str(e),
-                'detected_language': self.last_detected_language,
+                'detected_language': current_language,
                 'status_code': 500
             }
 
@@ -211,4 +219,5 @@ class CompaniesAgreementController:
         
         :param language: Idioma por defecto
         """
-        self.last_detected_language = language
+        # Actualizar sistema global en lugar de variable local
+        update_last_detected_language(language)

@@ -182,81 +182,164 @@ class ChatGPTHelper:
             # Si no se proporciona un idioma previo, obtener el último detectado
             previous_language = previous_language or get_last_detected_language()
             print(f"Previous Language: {previous_language}")
-
-            # Criterios para mantener el idioma anterior
-            # 1. Texto muy corto (menos de 6 caracteres)
-            # 2. Texto parece ser una palabra técnica, región o común en múltiples idiomas
+            
+            # Asegurar formato correcto del idioma previo
+            if previous_language and len(previous_language) == 2 and '-' not in previous_language:
+                language_map = {
+                    'es': 'es-ES', 'en': 'en-US', 'fr': 'fr-FR', 'de': 'de-DE', 
+                    'it': 'it-IT', 'pt': 'pt-PT', 'ru': 'ru-RU', 'zh': 'zh-CN', 
+                    'ja': 'ja-JP', 'ko': 'ko-KR', 'ar': 'ar-SA', 'hi': 'hi-IN',
+                    # Resto de idiomas...
+                }
+                previous_language = language_map.get(previous_language.lower(), 
+                                             f"{previous_language.lower()}-{previous_language.upper()}")
+            
+            # Mantener el idioma anterior en casos de texto corto o ambiguo
+            # Palabras cortas que son iguales o similares en varios idiomas
             palabras_ambiguas = [
-                # Tecnologías y sectores
-                'tech', 'it', 'software', 'data', 'cloud', 
-                'web', 'online', 'app', 'net', 'digital',
+                # Afirmación/negación
+                'no', 'yes', 'si', 'oui', 'non', 'ja', 'nein', 'ok', 'okay',
                 
-                # Regiones
-                'europa', 'europe', 'asia', 'africa', 
-                'america', 'europa', 'norte', 'nord', 
-                'south', 'sur', 'central', 'oeste', 
-                'west', 'east', 'este'
+                # Saludos cortos
+                'hi', 'hey', 'bye', 'hola', 'adios', 'ciao', 'salut',
+                
+                # Números y medidas
+                'one', 'two', 'three', 'uno', 'dos', 'tres', 'un', 'deux', 'trois',
+                
+                # Pronombres
+                'i', 'you', 'he', 'she', 'we', 'they', 'yo', 'tu', 'él', 'ella', 'je', 'tu', 'il', 'elle',
+                
+                # Palabras técnicas/internacionales
+                'tech', 'it', 'software', 'data', 'cloud', 'web', 'online', 'app', 'net', 'digital',
+                'email', 'internet', 'wifi', 'blog', 'post', 'chat', 'video', 'audio', 'photo',
+                
+                # Regiones/lugares
+                'europa', 'europe', 'asia', 'africa', 'america', 'norte', 'nord', 
+                'south', 'sur', 'central', 'oeste', 'west', 'east', 'este',
+                
+                # Marcas/nombres comunes
+                'google', 'facebook', 'twitter', 'amazon', 'apple', 'microsoft', 'tesla',
+                
+                # Emojis y símbolos (caracteres especiales)
+                ':-)', ':)', ':(', ':D', ';)', '?', '!', '...', '…'
             ]
-
-            if (len(text) <= 6 or 
-                any(keyword in text.lower() for keyword in palabras_ambiguas)):
-                print(f"Maintaining previous language due to short/ambiguous text")
+            
+            # Criterios estrictos para mantener el idioma anterior:
+            # 1. Texto muy corto (menos de 5 caracteres)
+            # 2. Texto es una palabra ambigua de la lista
+            # 3. Texto contiene principalmente símbolos o números
+            if (len(text.strip()) <= 4 or 
+                text.strip().lower() in palabras_ambiguas or 
+                sum(c.isalpha() for c in text) / max(len(text), 1) < 0.5):
+                
+                print(f"Maintaining previous language due to short/ambiguous text: {previous_language}")
+                # Normalizar y actualizar el idioma anterior en el estado global
+                detected_language = update_last_detected_language(previous_language)
+                
                 return {
                     "success": True,
                     "text": text,
-                    "detected_language": previous_language,
+                    "detected_language": detected_language,
                     "is_email": '@' in text,
                     "previous_language": previous_language
                 }
-
-            # Preparar mensajes para detección de idioma
+            
+            # Preparar mensajes para detección de idioma con más contexto
             messages = [
                 {
                     "role": "system",
-                    "content": """You are a specialized language detector. 
+                    "content": """You are a specialized language detector with exceptional accuracy.
                     Your task is to:
-                    1. Detect the language of the given text
-                    2. Return ONLY the language code (es-ES, en-US, fr-FR, etc.)
-                    3. Consider context and full text for accurate detection
-                    4. If the text is in Spanish, return 'es-ES'
-                    5. If the text is in English, return 'en-US'
-                    6. For other languages, use appropriate ISO codes"""
+                    1. Detect the precise language of the given text
+                    2. Return ONLY the ISO language code (es, en, fr, de, it, pt, ru, zh, ja, ko, ar, hi, etc.)
+                    3. Consider context, grammar patterns, and character sets
+                    4. For ambiguous short texts, analyze character patterns and probable language
+                    5. For mixed language texts, identify the predominant language
+                    6. Return ONLY the language code, nothing else"""
                 },
                 {
                     "role": "user",
                     "content": f"Detect the language code for this text: '{text}'"
                 }
             ]
-
+            
             # Realizar detección de idioma
             detect_response = self.client.chat.completions.create(
-                model="gpt-3.5-turbo",
+                model="gpt-4-turbo",  # Usar modelo más preciso para detección
                 messages=messages,
-                temperature=0.1
+                temperature=0.1,
+                max_tokens=10  # Limitar a respuesta corta
             )
             
-            detected_language = detect_response.choices[0].message.content.strip()
-
-            # Log adicional de depuración
-            print(f"Detected Language: {detected_language}")
-
-            # Validaciones y ajustes
-            if not detected_language or detected_language == '':
-                # Método de detección alternativo
-                if any('á' in text.lower() or 'é' in text.lower() or 'í' in text.lower() or 
-                    'ó' in text.lower() or 'ú' in text.lower()):
-                    detected_language = 'es-ES'
-                else:
-                    detected_language = previous_language or 'en-US'
-
-            # Asegurar que sea un código de idioma válido
-            if detected_language not in ['es-ES', 'en-US', 'fr-FR', 'de-DE', 'it-IT']:
+            detected_language = detect_response.choices[0].message.content.strip().lower()
+            print(f"Raw Detected Language: {detected_language}")
+            
+            # Mapa de códigos ISO a códigos regionales
+            language_map = {
+                'es': 'es-ES', 'en': 'en-US', 'fr': 'fr-FR', 'de': 'de-DE', 
+                'it': 'it-IT', 'pt': 'pt-PT', 'ru': 'ru-RU', 'zh': 'zh-CN', 
+                'ja': 'ja-JP', 'ko': 'ko-KR', 'ar': 'ar-SA', 'hi': 'hi-IN',
+                'nl': 'nl-NL', 'pl': 'pl-PL', 'tr': 'tr-TR', 'sv': 'sv-SE',
+                'da': 'da-DK', 'fi': 'fi-FI', 'no': 'no-NO', 'cs': 'cs-CZ',
+                'hu': 'hu-HU', 'el': 'el-GR', 'he': 'he-IL', 'th': 'th-TH',
+                'vi': 'vi-VN', 'id': 'id-ID', 'ms': 'ms-MY', 'uk': 'uk-UA',
+                'ro': 'ro-RO', 'bg': 'bg-BG', 'sr': 'sr-RS', 'hr': 'hr-HR',
+                'sk': 'sk-SK', 'ca': 'ca-ES', 'eu': 'eu-ES', 'gl': 'gl-ES',
+                'cy': 'cy-GB', 'is': 'is-IS', 'lt': 'lt-LT', 'lv': 'lv-LV',
+                'et': 'et-EE', 'fa': 'fa-IR', 'ur': 'ur-PK', 'bn': 'bn-IN',
+                'ta': 'ta-IN', 'te': 'te-IN', 'ml': 'ml-IN', 'kn': 'kn-IN',
+                'mr': 'mr-IN', 'gu': 'gu-IN', 'pa': 'pa-IN'
+            }
+            
+            # Extraer solo el código ISO si se detecta formato regional
+            if '-' in detected_language:
+                detected_iso = detected_language.split('-')[0].lower()
+            else:
+                detected_iso = detected_language.lower()
+            
+            # Convertir a formato regional estándar
+            if detected_iso in language_map:
+                detected_language = language_map[detected_iso]
+            elif detected_iso:
+                # Si tenemos un código ISO pero no está en nuestro mapa, usamos formato regional genérico
+                detected_language = f"{detected_iso}-{detected_iso.upper()}"
+            else:
+                # Si la detección falló completamente
                 detected_language = previous_language or 'en-US'
-
-            # Actualizar el idioma global
-            update_last_detected_language(detected_language)
+            
+            print(f"Standardized Detected Language: {detected_language}")
+            
+            # Validación y confianza en la detección
+            # Algunas heurísticas para mejorar la precisión
+            spanish_markers = ['á', 'é', 'í', 'ó', 'ú', 'ñ', '¿', '¡']
+            french_markers = ['ç', 'œ', 'à', 'è', 'ê', 'ô', 'î', 'ï', 'ü']
+            german_markers = ['ä', 'ö', 'ü', 'ß']
+            
+            # Verificación de caracteres específicos del idioma como respaldo
+            if any(marker in text.lower() for marker in spanish_markers) and detected_language != 'es-ES':
+                print(f"Overriding detection to Spanish due to specific characters")
+                detected_language = 'es-ES'
+            elif any(marker in text.lower() for marker in french_markers) and detected_language != 'fr-FR':
+                print(f"Overriding detection to French due to specific characters")
+                detected_language = 'fr-FR'
+            elif any(marker in text.lower() for marker in german_markers) and detected_language != 'de-DE':
+                print(f"Overriding detection to German due to specific characters")
+                detected_language = 'de-DE'
+            
+            # Verificar consistencia con mensaje anterior para evitar cambios innecesarios
+            # Si la confianza es baja, mantener el idioma anterior para evitar fluctuaciones
+            if len(text.split()) <= 3 and previous_language:
+                # Para mensajes muy cortos (1-3 palabras), ser más conservador
+                print(f"Short message: considering consistency with previous language")
+                # Sólo cambiar si estamos muy seguros (presencia de caracteres específicos)
+                if not any(char in text for char in ''.join(spanish_markers + french_markers + german_markers)):
+                    print(f"Maintaining previous language for consistency: {previous_language}")
+                    detected_language = previous_language
+            
+            # Actualizar el idioma global con la función de actualización
+            detected_language = update_last_detected_language(detected_language)
             print(f"Final detected language: {detected_language}")
-
+            
             return {
                 "success": True,
                 "text": text,
@@ -264,12 +347,16 @@ class ChatGPTHelper:
                 "is_email": '@' in text,
                 "previous_language": previous_language
             }
-
         except Exception as e:
             print(f"Error detecting language: {str(e)}")
+            # En caso de error, usar el idioma anterior o inglés como fallback, normalizando el formato
+            fallback_language = update_last_detected_language(previous_language or "en-US")
             return {
                 "success": False,
-                "detected_language": previous_language or "en-US",
+                "text": text,
+                "detected_language": fallback_language,
+                "is_email": '@' in text,
+                "previous_language": previous_language,
                 "error": str(e)
             }
         

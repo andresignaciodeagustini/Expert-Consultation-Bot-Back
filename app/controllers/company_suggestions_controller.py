@@ -9,78 +9,12 @@ from app.constants.language import (
     reset_last_detected_language
 )
 
-class CompanySuggestionsController:
-    def __init__(self):
-        self.chatgpt = ChatGPTHelper()
-        self.zoho_service = ZohoService()
-        self.logger = logging.getLogger(__name__)
-        self.excluded_companies = set()
-
-    def validate_input(self, data):
-        """
-        Validar datos de entrada
-        
-        :param data: Datos de la solicitud
-        :return: Resultado de validación
-        """
-        # Verificar si es una respuesta simple como "no"
-        if isinstance(data, str) and data.strip().lower() == "no":
-            return {
-                'is_valid': True,
-                'is_no_companies': True,
-                'sector': None,
-                'region': None,
-                'specific_area': None,
-                'preselected_companies': []
-            }
-            
-        if not data:
-            return {
-                'is_valid': False,
-                'error': 'No data provided'
-            }
-        
-        sector = data.get('sector')
-        region = data.get('processed_region') or data.get('region')
-        
-        # Manejar caso en que region sea un diccionario
-        if isinstance(region, dict):
-            # Intentar obtener el valor de región como texto
-            region_text = region.get('name') or region.get('region') or region.get('original_location')
-            # Si no podemos extraer un valor de texto, convertir a string
-            if not region_text:
-                self.logger.warning(f"Region is a dictionary without expected keys: {region}")
-                region_text = str(region)
-            region = region_text
-        
-        if not sector or not region:
-            return {
-                'is_valid': False,
-                'error': 'Sector and region are required'
-            }
-        
-        # Verificar si hay texto sin sentido en la entrada
-        if self._contains_nonsense_text(sector, region, data.get('specific_area', '')):
-            return {
-                'is_valid': False,
-                'error': 'nonsense_input',
-                'sector': sector,
-                'region': region,
-                'specific_area': data.get('specific_area'),
-                'detected_language': data.get('detected_language')
-            }
-        
-        return {
-            'is_valid': True,
-            'is_no_companies': False,
-            'sector': sector,
-            'region': region,
-            'specific_area': data.get('specific_area'),
-            'preselected_companies': data.get('preselected_companies', []),
-            'detected_language': data.get('detected_language')
-        }
-        
-    def _is_nonsense_text(self, text):
+class TextValidationService:
+    """
+    Servicio para validar y detectar texto sin sentido
+    """
+    @staticmethod
+    def is_nonsense_text(text):
         """
         Detecta si el texto parece no tener sentido
         
@@ -132,7 +66,8 @@ class CompanySuggestionsController:
                 
         return False
         
-    def _contains_nonsense_text(self, sector, region, specific_area):
+    @staticmethod
+    def contains_nonsense_text(sector, region, specific_area):
         """
         Verifica si alguno de los campos contiene texto sin sentido
         
@@ -141,120 +76,28 @@ class CompanySuggestionsController:
         :param specific_area: Área específica
         :return: True si algún campo contiene texto sin sentido
         """
-        if self._is_nonsense_text(sector):
+        if TextValidationService.is_nonsense_text(sector):
             return True
             
-        if self._is_nonsense_text(region):
+        if TextValidationService.is_nonsense_text(region):
             return True
             
-        if specific_area and self._is_nonsense_text(specific_area):
+        if specific_area and TextValidationService.is_nonsense_text(specific_area):
             return True
             
         return False
 
-    def get_company_suggestions(self, data):
-        """
-        Obtener sugerencias de empresas
+# Ahora estas clases son independientes, no anidadas
+class LanguageManagementService:
+    """
+    Servicio para gestionar la detección y configuración del idioma
+    """
+    
+    def __init__(self, chatgpt_helper, logger=None):
+        self.chatgpt = chatgpt_helper
+        self.logger = logger or logging.getLogger(__name__)
         
-        :param data: Datos de la solicitud
-        :return: Respuesta procesada
-        """
-        try:
-            # Verificar si es una respuesta "no" directa
-            if isinstance(data, str) and data.strip().lower() == "no":
-                self.logger.info("User responded 'no' to company suggestions prompt")
-                # Usar datos de la sesión anterior (necesita implementarse en un nivel superior)
-                # Por ahora, devolvemos mensaje de error informativo
-                return {
-                    'success': False,
-                    'error': 'Session data required for processing "no" response',
-                    'language': get_last_detected_language() or 'en-US',
-                    'status_code': 400
-                }
-
-            # Validar entrada
-            validation_result = self.validate_input(data)
-            
-            # Si el usuario respondió "no" (validado a nivel de objeto)
-            if validation_result.get('is_valid') and validation_result.get('is_no_companies', False):
-                self.logger.info("User responded 'no' to company suggestions - need previous session data")
-                # Aquí deberías recuperar sector y region de la sesión anterior
-                # Esta lógica debe implementarse según la estructura de sesiones de la app
-                
-                # Por ahora, mensaje informativo de error
-                return {
-                    'success': False,
-                    'error': 'Session data required when no companies specified',
-                    'language': get_last_detected_language() or 'en-US',
-                    'status_code': 400
-                }
-                
-            if not validation_result['is_valid']:
-                # Verificar si es por texto sin sentido
-                if validation_result.get('error') == 'nonsense_input':
-                    # Primero detectamos el idioma para el mensaje de error
-                    language = self._get_language_for_error_message(validation_result)
-                    
-                    # Mensaje guía para el usuario, simplificado y directo
-                    guidance_message = self.chatgpt.translate_message(
-                        "Please enter a valid response. Type 'yes' to proceed or 'no' to generate a new list.",
-                        language
-                    )
-                    
-                    return {
-                        'success': False,
-                        'message': guidance_message,
-                        'language': language,
-                        'status_code': 400
-                    }
-                
-                return {
-                    'success': False,
-                    'error': validation_result['error'],
-                    'language': get_last_detected_language(),
-                    'status_code': 400
-                }
-            
-            # Detectar y establecer idioma
-            self._detect_and_set_language(validation_result)
-            
-            # Extraer datos validados
-            sector = validation_result['sector']
-            region = validation_result['region']
-            specific_area = validation_result['specific_area']
-            preselected_companies = validation_result['preselected_companies']
-
-            # Registro de información
-            self.logger.info(f"Processing company suggestions - Sector: {sector}, Region: {region}")
-
-            # Obtener sugerencias de empresas
-            companies_result = self._get_companies_suggestions(
-                sector, region, specific_area, 
-                preselected_companies
-            )
-
-            # Generar respuesta final
-            result = self._generate_final_response(
-                companies_result, 
-                preselected_companies
-            )
-            
-            # Añadir código de estado a la respuesta
-            result['status_code'] = 200
-            
-            return result
-
-        except Exception as e:
-            error_message = f"Error processing company suggestions: {str(e)}"
-            self.logger.error(error_message, exc_info=True)
-            return {
-                'success': False,
-                'error': error_message,
-                'language': get_last_detected_language(),
-                'status_code': 500
-            }
-            
-    def _get_language_for_error_message(self, validation_result):
+    def get_language_for_error_message(self, validation_result):
         """
         Obtener el idioma para el mensaje de error
         
@@ -273,7 +116,7 @@ class CompanySuggestionsController:
         # Si no hay idioma detectado, usar inglés por defecto
         return 'en-US'
 
-    def _detect_and_set_language(self, validation_result):
+    def detect_and_set_language(self, validation_result):
         """
         Detectar y establecer el idioma
         
@@ -318,8 +161,28 @@ class CompanySuggestionsController:
             self.logger.warning(f"Language detection failed: {str(e)}")
             # Mantener el idioma actual
             # No forzar cambio a inglés si ya hay un idioma establecido
+            
+    def reset_language(self, language='en-US'):
+        """
+        Resetear el idioma detectado a un valor predeterminado
+        
+        :param language: Idioma a establecer (predeterminado: 'en-US')
+        """
+        reset_last_detected_language(language)
+        self.logger.info(f"Last detected language reset to: {language}")
 
-    def _get_companies_suggestions(self, sector, region, specific_area, preselected_companies):
+class CompanyProcessingService:
+    """
+    Servicio para procesar y gestionar sugerencias de empresas
+    """
+    
+    def __init__(self, chatgpt_helper, zoho_service, excluded_companies=None, logger=None):
+        self.chatgpt = chatgpt_helper
+        self.zoho_service = zoho_service
+        self.excluded_companies = excluded_companies or set()
+        self.logger = logger or logging.getLogger(__name__)
+    
+    def get_companies_suggestions(self, sector, region, specific_area, preselected_companies):
         """
         Obtener sugerencias de empresas desde ChatGPT
         
@@ -341,51 +204,8 @@ class CompanySuggestionsController:
             raise ValueError(companies_result.get('error', 'Error getting company suggestions'))
 
         return companies_result['content']
-
-    def _generate_final_response(self, suggested_companies, preselected_companies):
-        """
-        Generar respuesta final con empresas
-        
-        :param suggested_companies: Empresas sugeridas
-        :param preselected_companies: Empresas preseleccionadas
-        :return: Diccionario de respuesta
-        """
-        # Obtener el idioma actual
-        language = get_last_detected_language() or 'en-US'
-
-        # Obtener candidatos de Zoho
-        all_candidates = self.zoho_service.get_candidates()
-        db_companies = self._get_db_companies(all_candidates, suggested_companies)
-
-        # Generar lista final de empresas
-        final_companies = self._compile_final_company_list(
-            preselected_companies, 
-            db_companies, 
-            suggested_companies
-        )
-
-        # Mensaje base para diferentes idiomas
-        base_messages = {
-            'en-US': "Here are the recommended companies, with verified companies listed first. Do you agree with this list?",
-            # Añadir más idiomas según sea necesario
-        }
-
-        # Seleccionar y traducir mensaje
-        base_message = base_messages.get(language, base_messages['en-US'])
-        translated_message = self.chatgpt.translate_message(base_message, language)
-
-        # Preparar respuesta
-        return {
-            'success': True,
-            'message': translated_message,
-            'companies': final_companies,
-            'db_companies_count': len(db_companies),
-            'total_companies': len(final_companies),
-            'language': language,
-            'specific_area': None  # Ajustar según sea necesario
-        }
-
-    def _get_db_companies(self, all_candidates, suggested_companies):
+    
+    def get_db_companies(self, all_candidates, suggested_companies):
         """
         Obtener empresas de la base de datos
         
@@ -404,7 +224,7 @@ class CompanySuggestionsController:
                             break
         return db_companies
 
-    def _compile_final_company_list(self, preselected_companies, db_companies, suggested_companies):
+    def compile_final_company_list(self, preselected_companies, db_companies, suggested_companies):
         """
         Compilar lista final de empresas
         
@@ -439,12 +259,225 @@ class CompanySuggestionsController:
                     break
 
         return final_companies[:20]
-
-    def reset_last_detected_language(self, language='en-US'):
+    
+    def generate_final_response(self, suggested_companies, preselected_companies):
         """
-        Resetear el último idioma detectado
+        Generar respuesta final con empresas
         
-        :param language: Idioma por defecto
+        :param suggested_companies: Empresas sugeridas
+        :param preselected_companies: Empresas preseleccionadas
+        :return: Diccionario de respuesta
         """
-        reset_last_detected_language()
-        self.logger.info(f"Last detected language reset to: {language}")
+        # Obtener el idioma actual
+        language = get_last_detected_language() or 'en-US'
+
+        # Obtener candidatos de Zoho
+        all_candidates = self.zoho_service.get_candidates()
+        db_companies = self.get_db_companies(all_candidates, suggested_companies)
+
+        # Generar lista final de empresas
+        final_companies = self.compile_final_company_list(
+            preselected_companies, 
+            db_companies, 
+            suggested_companies
+        )
+
+        # Mensaje base para diferentes idiomas
+        base_messages = {
+            'en-US': "Here are the recommended companies, with verified companies listed first. Do you agree with this list?",
+            # Añadir más idiomas según sea necesario
+        }
+
+        # Seleccionar y traducir mensaje
+        base_message = base_messages.get(language, base_messages['en-US'])
+        translated_message = self.chatgpt.translate_message(base_message, language)
+
+        # Preparar respuesta
+        return {
+            'success': True,
+            'message': translated_message,
+            'companies': final_companies,
+            'db_companies_count': len(db_companies),
+            'total_companies': len(final_companies),
+            'language': language,
+            'specific_area': None  # Ajustar según sea necesario
+        }
+
+class CompanySuggestionsController:
+    def __init__(self):
+        self.chatgpt = ChatGPTHelper()
+        self.zoho_service = ZohoService()
+        self.logger = logging.getLogger(__name__)
+        self.excluded_companies = set()
+        
+        # Inicializar servicios
+        self.language_service = LanguageManagementService(self.chatgpt, self.logger)
+        self.company_service = CompanyProcessingService(
+            self.chatgpt, self.zoho_service, self.excluded_companies, self.logger
+        )
+
+    def validate_input(self, data):
+        """
+        Validar datos de entrada
+        
+        :param data: Datos de la solicitud
+        :return: Resultado de validación
+        """
+        # Verificar si es una respuesta simple como "no"
+        if isinstance(data, str) and data.strip().lower() == "no":
+            return {
+                'is_valid': True,
+                'is_no_companies': True,
+                'sector': None,
+                'region': None,
+                'specific_area': None,
+                'preselected_companies': []
+            }
+                
+        if not data:
+            return {
+                'is_valid': False,
+                'error': 'No data provided'
+            }
+        
+        sector = data.get('sector')
+        region = data.get('processed_region') or data.get('region')
+        
+        # Manejar caso en que region sea un diccionario
+        if isinstance(region, dict):
+            # Intentar obtener el valor de región como texto
+            region_text = region.get('name') or region.get('region') or region.get('original_location')
+            # Si no podemos extraer un valor de texto, convertir a string
+            if not region_text:
+                self.logger.warning(f"Region is a dictionary without expected keys: {region}")
+                region_text = str(region)
+            region = region_text
+        
+        if not sector or not region:
+            return {
+                'is_valid': False,
+                'error': 'Sector and region are required'
+            }
+        
+        # Verificar si hay texto sin sentido en la entrada
+        if TextValidationService.contains_nonsense_text(sector, region, data.get('specific_area', '')):
+            return {
+                'is_valid': False,
+                'error': 'nonsense_input',
+                'sector': sector,
+                'region': region,
+                'specific_area': data.get('specific_area'),
+                'detected_language': data.get('detected_language')
+            }
+        
+        return {
+            'is_valid': True,
+            'is_no_companies': False,
+            'sector': sector,
+            'region': region,
+            'specific_area': data.get('specific_area'),
+            'preselected_companies': data.get('preselected_companies', []),
+            'detected_language': data.get('detected_language')
+        }
+
+    def get_company_suggestions(self, data):
+        """
+        Obtener sugerencias de empresas
+        
+        :param data: Datos de la solicitud
+        :return: Respuesta procesada
+        """
+        try:
+            # Verificar si es una respuesta "no" directa
+            if isinstance(data, str) and data.strip().lower() == "no":
+                self.logger.info("User responded 'no' to company suggestions prompt")
+                # Usar datos de la sesión anterior (necesita implementarse en un nivel superior)
+                # Por ahora, devolvemos mensaje de error informativo
+                return {
+                    'success': False,
+                    'error': 'Session data required for processing "no" response',
+                    'language': get_last_detected_language() or 'en-US',
+                    'status_code': 400
+                }
+
+            # Validar entrada
+            validation_result = self.validate_input(data)
+            
+            # Si el usuario respondió "no" (validado a nivel de objeto)
+            if validation_result.get('is_valid') and validation_result.get('is_no_companies', False):
+                self.logger.info("User responded 'no' to company suggestions - need previous session data")
+                # Aquí deberías recuperar sector y region de la sesión anterior
+                # Esta lógica debe implementarse según la estructura de sesiones de la app
+                
+                # Por ahora, mensaje informativo de error
+                return {
+                    'success': False,
+                    'error': 'Session data required when no companies specified',
+                    'language': get_last_detected_language() or 'en-US',
+                    'status_code': 400
+                }
+                
+            if not validation_result['is_valid']:
+                # Verificar si es por texto sin sentido
+                if validation_result.get('error') == 'nonsense_input':
+                    # Primero detectamos el idioma para el mensaje de error
+                    language = self.language_service.get_language_for_error_message(validation_result)
+                    
+                    # Mensaje guía para el usuario, simplificado y directo
+                    guidance_message = self.chatgpt.translate_message(
+                        "Please enter a valid response. Type 'yes' to proceed or 'no' to generate a new list.",
+                        language
+                    )
+                    
+                    return {
+                        'success': False,
+                        'message': guidance_message,
+                        'language': language,
+                        'status_code': 400
+                    }
+                
+                return {
+                    'success': False,
+                    'error': validation_result['error'],
+                    'language': get_last_detected_language(),
+                    'status_code': 400
+                }
+            
+            # Detectar y establecer idioma
+            self.language_service.detect_and_set_language(validation_result)
+            
+            # Extraer datos validados
+            sector = validation_result['sector']
+            region = validation_result['region']
+            specific_area = validation_result['specific_area']
+            preselected_companies = validation_result['preselected_companies']
+
+            # Registro de información
+            self.logger.info(f"Processing company suggestions - Sector: {sector}, Region: {region}")
+
+            # Obtener sugerencias de empresas
+            companies_result = self.company_service.get_companies_suggestions(
+                sector, region, specific_area, 
+                preselected_companies
+            )
+
+            # Generar respuesta final
+            result = self.company_service.generate_final_response(
+                companies_result, 
+                preselected_companies
+            )
+            
+            # Añadir código de estado a la respuesta
+            result['status_code'] = 200
+            
+            return result
+
+        except Exception as e:
+            error_message = f"Error processing company suggestions: {str(e)}"
+            self.logger.error(error_message, exc_info=True)
+            return {
+                'success': False,
+                'error': error_message,
+                'language': get_last_detected_language(),
+                'status_code': 500
+            }

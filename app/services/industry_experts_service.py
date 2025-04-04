@@ -203,32 +203,76 @@ class IndustryExpertsService:
         :param detected_language: Idioma detectado
         :return: Respuesta final
         """
+        # Traducir mensajes
+        translated_messages = self._translate_messages(detected_language)
+        
         final_response = {
             'success': True,
             'experts': {
                 'main': {
-                    'experts': categorized_experts['main_companies']['experts'],
+                    'experts': [],  # Se llenará con expertos traducidos
                     'total_found': len(categorized_experts['main_companies']['experts']),
                     'companies': list(categorized_experts['main_companies']['companies_found'])
                 }
             }
         }
-
-        # Agregar categorías adicionales
+        
+        # Agregar categorías adicionales (estructuras vacías)
         if categorized_experts['client_companies']['experts']:
             final_response['experts']['client'] = {
-                'experts': categorized_experts['client_companies']['experts'],
+                'experts': [],  # Se llenará con expertos traducidos
                 'total_found': len(categorized_experts['client_companies']['experts']),
                 'companies': list(categorized_experts['client_companies']['companies_found'])
             }
-
+        
         if categorized_experts['supply_companies']['experts']:
             final_response['experts']['supply_chain'] = {
-                'experts': categorized_experts['supply_companies']['experts'],
+                'experts': [],  # Se llenará con expertos traducidos
                 'total_found': len(categorized_experts['supply_companies']['experts']),
                 'companies': list(categorized_experts['supply_companies']['companies_found'])
             }
-
+        
+        # Procesar y traducir cada experto por categoría
+        for category_key, source_category in [
+            ('main', 'main_companies'),
+            ('client', 'client_companies'),
+            ('supply_chain', 'supply_companies')
+        ]:
+            # Verificar si esta categoría existe en la respuesta
+            if category_key in final_response['experts'] and categorized_experts[source_category]['experts']:
+                for expert in categorized_experts[source_category]['experts']:
+                    # Crear una copia del experto para traducir campos
+                    translated_expert = expert.copy()
+                    
+                    # Traducir el rol
+                    translated_expert['current_role'] = self.chatgpt.translate_message(
+                        expert['current_role'], 
+                        detected_language
+                    )
+                    
+                    # Traducir la experiencia - reemplazar "years" con su traducción
+                    years_translated = self.chatgpt.translate_message("years", detected_language)
+                    translated_expert['experience'] = expert['experience'].replace("years", years_translated)
+                    
+                    # Traducir ubicación - dividir, traducir partes y volver a unir
+                    location_parts = expert['location'].split(', ')
+                    translated_location_parts = [
+                        self.chatgpt.translate_message(part, detected_language) 
+                        for part in location_parts
+                    ]
+                    translated_expert['location'] = ', '.join(translated_location_parts)
+                    
+                    # Crear formatted_data con etiquetas y valores traducidos
+                    translated_expert['formatted_data'] = {
+                        translated_messages['current_role_label']: translated_expert['current_role'],
+                        translated_messages['company_label']: translated_expert['current_employer'],
+                        translated_messages['experience_label']: translated_expert['experience'],
+                        translated_messages['location_label']: translated_expert['location']
+                    }
+                    
+                    # Agregar a la categoría correspondiente en la respuesta final
+                    final_response['experts'][category_key]['experts'].append(translated_expert)
+        
         # Agregar totales
         final_response['total_experts_shown'] = sum(
             len(cat['experts']) for cat in final_response['experts'].values()
@@ -236,10 +280,10 @@ class IndustryExpertsService:
         final_response['total_experts_found'] = sum(
             cat['total_found'] for cat in final_response['experts'].values()
         )
-
-        # Traducir mensajes
-        final_response['messages'] = self._translate_messages(detected_language)
-
+        
+        # Añadir mensajes traducidos
+        final_response['messages'] = translated_messages
+        
         return final_response
 
     def _translate_messages(self, detected_language):
@@ -256,8 +300,28 @@ class IndustryExpertsService:
             'supply_chain_experts_title': 'Supply Chain Experts',
             'selection_instructions': 'Please select an expert by entering their name exactly as it appears in the list.',
             'selection_example': 'For example: "{expert_name}"',
-            'selection_prompt': 'Which expert would you like to select?'
+            'selection_prompt': 'Which expert would you like to select?',
+            # Etiquetas de los datos de expertos
+            'current_role_label': 'Current Role',
+            'company_label': 'Company',
+            'experience_label': 'Experience',
+            'location_label': 'Location',
+            # Roles comunes pre-traducidos (opcional - como respaldo)
+            'role_translations': {
+                'CFO': self.chatgpt.translate_message('CFO', detected_language),
+                'Head of Finance': self.chatgpt.translate_message('Head of Finance', detected_language),
+                'Financial Controller': self.chatgpt.translate_message('Financial Controller', detected_language),
+                'Treasury Manager': self.chatgpt.translate_message('Treasury Manager', detected_language),
+            },
+            # Traducciones adicionales para UI
+            'screening_questions_title': 'Screening Questions',
+            'no_questions_available': 'No questions available'
         }
 
-        return {key: self.chatgpt.translate_message(msg, detected_language) 
-                for key, msg in BASE_MESSAGES.items()}
+        # Traducir todos los mensajes base
+        translated_messages = {
+            key: self.chatgpt.translate_message(msg, detected_language) 
+            for key, msg in BASE_MESSAGES.items()
+        }
+        
+        return translated_messages

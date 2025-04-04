@@ -69,7 +69,7 @@ class SupplyChainExperienceController:
         
     def _is_nonsense_text(self, text):
         """
-        Detecta si el texto parece no tener sentido
+        Detecta si el texto parece no tener sentido usando extract_intention
         
         :param text: Texto a evaluar
         :return: True si parece ser texto sin sentido, False en caso contrario
@@ -78,44 +78,21 @@ class SupplyChainExperienceController:
             return False
             
         # Quitar espacios extras
-        text = text.strip().lower()
+        text = text.strip()
         
-        # Respuestas válidas específicas para este controlador
-        valid_answers = ['yes', 'y', 'yeah', 'yep', 'si', 'sí', 'no', 'n', 'nope', 'no,', 'noo', 'yes,', 'yess']
-        if text in valid_answers:
+        # Usar extract_intention de ChatGPT para determinar si el texto tiene un significado claro
+        intention_result = self.chatgpt.extract_intention(text)
+        intention = intention_result.get('intention') if intention_result.get('success') else None
+        
+        # Si el texto es muy corto y ChatGPT no puede determinar una intención, considerarlo sin sentido
+        if len(text) < 3 and not intention:
+            return True
+        
+        # Si ChatGPT puede determinar que es sí/no, no es sin sentido
+        if intention in ['yes', 'no']:
             return False
             
-        # Texto muy corto (menor a 3 caracteres)
-        if len(text) < 3:
-            return True
-            
-        # Solo números
-        if re.match(r'^[0-9]+$', text):
-            return True
-            
-        # Palabras cortas sin contexto como "dogs", "cat", etc.
-        if re.match(r'^[a-z]+$', text.lower()) and len(text) < 5:
-            return True
-            
-        # Verificar patrones comunes de teclado
-        keyboard_patterns = ['asdf', 'qwer', 'zxcv', '1234', 'hjkl', 'uiop']
-        for pattern in keyboard_patterns:
-            if pattern in text.lower():
-                return True
-            
-        # Texto aleatorio (una sola palabra larga sin espacios)
-        if len(text.split()) == 1 and len(text) > 8:
-            # Verificar si tiene una distribución de caracteres poco natural
-            # Caracteres raros o poco comunes en muchos idiomas
-            rare_chars = len(re.findall(r'[qwxzjkvfy]', text.lower()))
-            if rare_chars / len(text) > 0.3:  # Alta proporción de caracteres poco comunes
-                return True
-            
-            # Patrones repetitivos
-            if any(text.count(c) > len(text) * 0.4 for c in text):  # Un carácter repetido muchas veces
-                return True
-                
-        return False
+        return intention is None
 
     def process_supply_chain_experience(self, data):
         """
@@ -244,13 +221,7 @@ class SupplyChainExperienceController:
             
             # Si hay una respuesta, procesar su idioma
             if 'answer' in data:
-                # Manejar casos especiales de palabras cortas
-                answer = data['answer'].strip().lower()
-                if answer in ['no', 'n', 'yes', 'y', 'si', 'sí']:
-                    print(f"Special case word detected: '{answer}'. Maintaining current language: {current_language}")
-                    return current_language
-                
-                # Para respuestas normales, usar la detección
+                # Usar process_text_input para manejar la detección de idioma manteniendo la consistencia
                 text_processing_result = self.chatgpt.process_text_input(
                     data['answer'], 
                     current_language
@@ -308,28 +279,18 @@ class SupplyChainExperienceController:
 
     def _process_perspective_response(self, data, detected_language):
         """
-        Procesar respuesta de perspectiva directamente con comprobación de palabras clave
+        Procesar respuesta de perspectiva usando la extracción de intención de ChatGPT
         
         :param data: Datos de la solicitud
         :param detected_language: Idioma detectado
         :return: Respuesta procesada
         """
         print("\n=== Perspective Response Processing ===")
-        answer = data['answer'].strip().lower()
+        answer = data['answer'].strip()
         print(f"Input answer: '{answer}'")
         print(f"Using language: {detected_language}")
         
-        # Detectar directamente respuestas negativas comunes
-        if answer in ['no', 'n', 'nope', 'no,', 'noo']:
-            print("Direct negative response detected")
-            return self._handle_negative_response(detected_language, data)
-            
-        # Detectar directamente respuestas positivas comunes
-        if answer in ['yes', 'y', 'yeah', 'yep', 'si', 'sí', 'yes,', 'yess']:
-            print("Direct positive response detected")
-            return self._handle_positive_response(data, detected_language)
-        
-        # Para respuestas más complejas, usar el chatgpt para extraer la intención
+        # Usar extract_intention para todas las respuestas
         intention_result = self.chatgpt.extract_intention(answer)
         intention = intention_result.get('intention') if intention_result.get('success') else None
         
