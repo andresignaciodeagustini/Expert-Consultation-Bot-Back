@@ -52,9 +52,9 @@ class NameCaptureController:
             if len(data['text']) <= 15 and not has_non_latin:
                 detected_language = previous_language
                 print(f"Short latin text detected, maintaining previous language: {previous_language}")
-
-            print(f"Text processing result: {text_processing_result}")
-            print(f"Detected language: {detected_language}")
+            
+            # DEBUG: Verificar idioma antes de actualizar global
+            print(f"Final detected language before global update: {detected_language}")
             
             # Actualizar idioma global
             update_last_detected_language(detected_language)
@@ -85,6 +85,9 @@ class NameCaptureController:
             is_registered = data['is_registered']
             print(f"Extracted name: {name}")
             print(f"Is registered: {is_registered}")
+            
+            # DEBUG: Verificar idioma antes de la generación de respuesta
+            print(f"Language for response generation: {detected_language}")
 
             # Generación de respuesta
             print("\n=== Message Translation ===")
@@ -97,6 +100,9 @@ class NameCaptureController:
             response['type'] = 'bot'
             response['companies'] = None
             response['isError'] = False
+            
+            # DEBUG: Verificar el idioma en la respuesta final
+            print(f"Final response language: {response.get('detected_language')}")
 
             print("\n=== Final Response ===")
             print(f"Sending response: {response}")
@@ -131,18 +137,25 @@ class NameCaptureController:
         :param detected_language: Idioma detectado
         :return: Diccionario de respuesta
         """
+        # DEBUG: Verificar idioma al entrar a _handle_registered_user
+        print(f"Language in _handle_registered_user: {detected_language}")
+        
         # Comprobar si el nombre es válido o es "No_name"
         if name and name != "No_name":
             base_message = f"Welcome back {name}! Would you like to connect with our experts?"
         else:
             base_message = "Welcome back! Would you like to connect with our experts?"
-            
+        
+        # DEBUG: Registro antes de traducción
+        print(f"Base message before translation: '{base_message}'")
+        print(f"Using language for translation: '{detected_language}'")
+        
         translated_message = self.chatgpt.translate_message(base_message, detected_language)
-        print(f"Translated welcome message: {translated_message}")
+        print(f"Translated welcome message: '{translated_message}'")
         
         yes_option = self.chatgpt.translate_message("yes", detected_language)
         no_option = self.chatgpt.translate_message("no", detected_language)
-        print(f"Translated options: yes={yes_option}, no={no_option}")
+        print(f"Translated options: yes='{yes_option}', no='{no_option}'")
 
         return {
             'success': True,
@@ -165,15 +178,18 @@ class NameCaptureController:
         :param detected_language: Idioma detectado
         :return: Diccionario de respuesta
         """
+        # DEBUG: Verificar idioma al entrar a _handle_unregistered_user
+        print(f"Language in _handle_unregistered_user: {detected_language}")
+        
         base_message = f"Thank you {name}! To better assist you, we recommend speaking with one of our agents."
         translated_message = self.chatgpt.translate_message(base_message, detected_language)
-        print(f"Translated thank you message: {translated_message}")
+        print(f"Translated thank you message: '{translated_message}'")
         
         booking_message = self.chatgpt.translate_message(
             "Would you like to schedule a call?",
             detected_language
         )
-        print(f"Translated booking message: {booking_message}")
+        print(f"Translated booking message: '{booking_message}'")
 
         return {
             'success': True,
