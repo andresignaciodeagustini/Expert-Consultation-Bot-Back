@@ -58,6 +58,11 @@ class ChatGPTHelper:
         self.retry_delay = 1
         self.current_language = 'en'
 
+        # Añadir cachés para optimizar llamadas a la API
+        self._translation_cache = {}
+        self._language_detection_cache = {}
+        self._company_suggestions_cache = {}
+
         if not self.api_key:
             logger.error("OPENAI_API_KEY not found in environment variables")
             raise ValueError("OPENAI_API_KEY not found in environment variables")
@@ -79,7 +84,6 @@ class ChatGPTHelper:
         except Exception as e:
             logger.error(f"Failed to initialize service: {str(e)}")
             raise
-
     def _import_username_processor(self):
         """Función auxiliar para importar UsernameProcessor de manera segura"""
         try:
@@ -150,6 +154,25 @@ class ChatGPTHelper:
 
     def translate_message(self, message: str, target_language: str) -> str:
         try:
+            # Si el mensaje está vacío o es None, devolverlo tal cual
+            if not message:
+                return message
+                
+            # Si el idioma objetivo es inglés o no está definido, devolver el mensaje original
+            if not target_language or target_language.lower() in ['en', 'en-us', 'english']:
+                return message
+                
+            # Crear una clave de caché
+            cache_key = f"{message}_{target_language}"
+            
+            # Verificar si ya está en caché
+            if cache_key in self._translation_cache:
+                logger.debug(f"Translation cache hit for key: {cache_key[:30]}...")
+                return self._translation_cache[cache_key]
+            
+            logger.debug(f"Translation cache miss for key: {cache_key[:30]}...")
+            
+            # Si no está en caché, hacer la llamada a la API
             messages = [
                 {
                     "role": "system",
@@ -167,11 +190,16 @@ class ChatGPTHelper:
                 temperature=0.3
             )
 
-            return response.choices[0].message.content.strip()
+            result = response.choices[0].message.content.strip()
+            
+            # Guardar en caché
+            self._translation_cache[cache_key] = result
+            
+            return result
 
         except Exception as e:
             logger.error(f"Translation error: {str(e)}")
-            return message  # Retorna el mensaje original si hay error
+            return message  # Retorna el mensaje original si hay error mensaje original si hay error
     
     def process_text_input(self, text: str, previous_language: str = None) -> Dict:
         try:
